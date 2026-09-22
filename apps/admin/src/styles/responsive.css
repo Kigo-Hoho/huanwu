@@ -1,0 +1,217 @@
+:root {
+  color: #17211f;
+  background: #f3f6f5;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #f3f6f5;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-inline: max(24px, calc((100vw - 1280px) / 2));
+  background: rgb(255 255 255 / 94%);
+  border-bottom: 1px solid #dfe7e4;
+  backdrop-filter: blur(12px);
+}
+
+.brand-name {
+  color: #174b42;
+  font-size: 18px;
+}
+
+.operator-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.workspace-page {
+  width: min(1280px, calc(100% - 48px));
+  margin: 0 auto;
+  padding-block: 40px 64px;
+}
+
+.page-heading,
+.item-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 16px 0 28px;
+}
+
+.page-heading h1,
+.item-heading h1 {
+  margin: 4px 0 0;
+}
+
+.centered-state {
+  display: grid;
+  min-height: 40vh;
+  place-items: center;
+}
+
+.queue-thumbnail,
+.item-image {
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.mobile-review-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.review-card {
+  display: flex;
+  gap: 16px;
+}
+
+.review-card-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.review-card-content a {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-card-content time {
+  color: #687773;
+  font-size: 12px;
+}
+
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 24px;
+  align-items: start;
+}
+
+.item-evidence {
+  display: grid;
+  gap: 20px;
+}
+
+.item-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.item-image-grid .ant-image,
+.item-image-grid .ant-image-img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+}
+
+.review-panel {
+  position: sticky;
+  top: 88px;
+}
+
+.review-actions {
+  display: grid;
+  gap: 20px;
+}
+
+.review-actions > .ant-btn {
+  width: 100%;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 20%, rgb(23 107 91 / 14%), transparent 35%),
+    #f3f6f5;
+  place-items: center;
+}
+
+.login-card {
+  width: min(100%, 420px);
+  box-shadow: 0 24px 60px rgb(31 63 57 / 12%);
+}
+
+@media (max-width: 767px) {
+  .app-header {
+    height: auto;
+    min-height: 64px;
+    padding: 10px 16px;
+  }
+
+  .operator-meta > span {
+    display: none;
+  }
+
+  .workspace-page {
+    width: 100%;
+    padding: 20px 14px 40px;
+  }
+
+  .page-heading,
+  .item-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    margin-block: 14px 20px;
+  }
+
+  .page-heading h1,
+  .item-heading h1 {
+    font-size: 27px;
+  }
+
+  .detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .item-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .review-panel {
+    position: static;
+  }
+
+  .review-actions > .ant-btn,
+  .review-actions .ant-form-item-control-input-content > .ant-btn {
+    min-height: 44px;
+  }
+
+  .ant-card .ant-card-body {
+    padding: 16px;
+  }
+}
