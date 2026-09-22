@@ -6,7 +6,6 @@ import { Role } from '../src/generated/prisma/enums.js';
 
 const localDatabaseUrl =
   'postgresql://barter:barter_local_password@localhost:5432/barter';
-const localAdminPassword = 'local-development-admin-password';
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({
@@ -103,8 +102,12 @@ async function seedCustomer(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const adminPassword =
-    process.env.ADMIN_SEED_PASSWORD ?? localAdminPassword;
+  const adminPassword = process.env.ADMIN_SEED_PASSWORD;
+  if (!adminPassword?.trim()) {
+    throw new Error(
+      'ADMIN_SEED_PASSWORD is required and must not be blank before seeding',
+    );
+  }
 
   await seedAdminUsers(adminPassword);
   await seedCustomer();
