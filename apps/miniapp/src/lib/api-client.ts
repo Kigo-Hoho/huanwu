@@ -53,6 +53,8 @@ function errorMessage(body: unknown): string {
 }
 
 export class AuthenticatedApiClient {
+  private identityProvider: IdentityCodeProvider | null = null;
+
   constructor(
     private readonly baseUrl: string,
     private readonly session: Session,
@@ -61,7 +63,12 @@ export class AuthenticatedApiClient {
   ) {}
 
   async authenticate(identityProvider: IdentityCodeProvider): Promise<void> {
+    this.identityProvider = identityProvider;
     if (this.session.getAccessToken()) return;
+    await this.createSession(identityProvider);
+  }
+
+  private async createSession(identityProvider: IdentityCodeProvider): Promise<void> {
     const code = await identityProvider.getCode();
     const response = await this.send<AuthSessionResponse>({
       url: '/api/auth/wechat',
@@ -71,11 +78,14 @@ export class AuthenticatedApiClient {
     if (
       typeof response !== 'object' ||
       response === null ||
-      typeof response.accessToken !== 'string'
+      typeof response.accessToken !== 'string' ||
+      typeof response.expiresIn !== 'number' ||
+      !Number.isFinite(response.expiresIn) ||
+      response.expiresIn <= 0
     ) {
       throw new Error('登录响应无效。');
     }
-    this.session.setAccessToken(response.accessToken);
+    this.session.setAccessToken(response.accessToken, response.expiresIn);
   }
 
   createItem(input: CreateItem): Promise<ItemView> {
@@ -92,15 +102,22 @@ export class AuthenticatedApiClient {
       'POST',
       undefined,
       { 'Idempotency-Key': idempotencyKey },
+      true,
     );
   }
 
   listMyItems(): Promise<ItemView[]> {
-    return this.authorized<ItemView[]>('/api/me/items', 'GET');
+    return this.authorized<ItemView[]>('/api/me/items', 'GET', undefined, {}, true);
   }
 
   getMyItem(itemId: string): Promise<ItemView> {
-    return this.authorized<ItemView>(`/api/me/items/${encodeURIComponent(itemId)}`, 'GET');
+    return this.authorized<ItemView>(
+      `/api/me/items/${encodeURIComponent(itemId)}`,
+      'GET',
+      undefined,
+      {},
+      true,
+    );
   }
 
   private async authorized<T>(
@@ -108,15 +125,36 @@ export class AuthenticatedApiClient {
     method: RequestOptions['method'],
     data?: unknown,
     additionalHeaders: Record<string, string> = {},
+    retryAfterAuthentication = false,
   ): Promise<T> {
-    const token = this.session.getAccessToken();
-    if (!token) throw new Error('Customer authentication is required.');
-    return this.send<T>({
-      url: path,
-      method,
-      data,
-      header: { Authorization: `Bearer ${token}`, ...additionalHeaders },
-    });
+    const execute = (): Promise<T> => {
+      const token = this.session.getAccessToken();
+      if (!token) throw new Error('Customer authentication is required.');
+      return this.send<T>({
+        url: path,
+        method,
+        data,
+        header: { Authorization: `Bearer ${token}`, ...additionalHeaders },
+      });
+    };
+
+    try {
+      return await execute();
+    } catch (cause) {
+      if (!(cause instanceof ApiClientError) || cause.statusCode !== 401) throw cause;
+      this.session.clear();
+      if (!this.identityProvider) throw cause;
+      await this.createSession(this.identityProvider);
+      if (!retryAfterAuthentication) throw cause;
+      try {
+        return await execute();
+      } catch (retryCause) {
+        if (retryCause instanceof ApiClientError && retryCause.statusCode === 401) {
+          this.session.clear();
+        }
+        throw retryCause;
+      }
+    }
   }
 
   private async send<T>(options: RequestOptions): Promise<T> {

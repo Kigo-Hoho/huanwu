@@ -17,7 +17,7 @@ class MemoryStorage implements SynchronousStorage {
     return this.values.get(key);
   }
 
-  setStorageSync(key: string, value: string): void {
+  setStorageSync(key: string, value: unknown): void {
     this.values.set(key, value);
   }
 
@@ -52,10 +52,45 @@ describe('customer adapters', () => {
     const session = new Session(storage);
 
     expect(session.getAccessToken()).toBeNull();
-    session.setAccessToken('customer-token');
+    session.setAccessToken('customer-token', 900);
     expect(session.getAccessToken()).toBe('customer-token');
     session.clear();
     expect(session.getAccessToken()).toBeNull();
+  });
+
+  it('expires a persisted session by absolute time and authenticates again', async () => {
+    const storage = new MemoryStorage();
+    let now = 1_000_000;
+    const originalSession = new Session(storage, () => now);
+    originalSession.setAccessToken('expired-token', 1);
+    now += 1_001;
+
+    const restoredSession = new Session(storage, () => now);
+    const request = vi.fn().mockResolvedValue({
+      statusCode: 201,
+      data: {
+        accessToken: 'fresh-token',
+        expiresIn: 900,
+        user: { id: item.ownerId, roles: ['CUSTOMER'] },
+      },
+    });
+    const identity = { getCode: vi.fn().mockResolvedValue('new-wechat-code') };
+    const client = new AuthenticatedApiClient(
+      'http://localhost:3000',
+      restoredSession,
+      request,
+    );
+
+    await client.authenticate(identity);
+
+    expect(identity.getCode).toHaveBeenCalledTimes(1);
+    expect(restoredSession.getAccessToken()).toBe('fresh-token');
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'http://localhost:3000/api/auth/wechat',
+        data: { code: 'new-wechat-code' },
+      }),
+    );
   });
 
   it('gets the customer code from the injected Taro login boundary', async () => {
@@ -135,9 +170,118 @@ describe('customer adapters', () => {
     });
   });
 
+  it('refreshes a rejected token and retries a safe request only once', async () => {
+    const session = new Session(new MemoryStorage());
+    session.setAccessToken('stale-token', 900);
+    const unauthorized = {
+      statusCode: 401,
+      data: { message: 'Access token has expired' },
+    };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(unauthorized)
+      .mockResolvedValueOnce({
+        statusCode: 201,
+        data: {
+          accessToken: 'fresh-token',
+          expiresIn: 900,
+          user: { id: item.ownerId, roles: ['CUSTOMER'] },
+        },
+      })
+      .mockResolvedValueOnce(unauthorized);
+    const identity = { getCode: vi.fn().mockResolvedValue('fresh-wechat-code') };
+    const client = new AuthenticatedApiClient('http://localhost:3000', session, request);
+    await client.authenticate(identity);
+
+    await expect(client.listMyItems()).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(identity.getCode).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      method: 'GET',
+      header: { Authorization: 'Bearer stale-token' },
+    });
+    expect(request.mock.calls[2]?.[0]).toMatchObject({
+      method: 'GET',
+      header: { Authorization: 'Bearer fresh-token' },
+    });
+  });
+
+  it('refreshes after an unsafe request gets 401 without replaying that request', async () => {
+    const session = new Session(new MemoryStorage());
+    session.setAccessToken('stale-token', 900);
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 401,
+        data: { message: 'Access token has expired' },
+      })
+      .mockResolvedValueOnce({
+        statusCode: 201,
+        data: {
+          accessToken: 'fresh-token',
+          expiresIn: 900,
+          user: { id: item.ownerId, roles: ['CUSTOMER'] },
+        },
+      });
+    const identity = { getCode: vi.fn().mockResolvedValue('fresh-wechat-code') };
+    const client = new AuthenticatedApiClient('http://localhost:3000', session, request);
+    await client.authenticate(identity);
+
+    await expect(client.createItem(item)).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(
+      request.mock.calls.filter(([options]) => options.url.endsWith('/api/items')),
+    ).toHaveLength(1);
+    expect(session.getAccessToken()).toBe('fresh-token');
+  });
+
+  it('replays an idempotency-keyed submit once with the same command key after 401', async () => {
+    const session = new Session(new MemoryStorage());
+    session.setAccessToken('stale-token', 900);
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 401,
+        data: { message: 'Access token has expired' },
+      })
+      .mockResolvedValueOnce({
+        statusCode: 201,
+        data: {
+          accessToken: 'fresh-token',
+          expiresIn: 900,
+          user: { id: item.ownerId, roles: ['CUSTOMER'] },
+        },
+      })
+      .mockResolvedValueOnce({ statusCode: 200, data: item });
+    const identity = { getCode: vi.fn().mockResolvedValue('fresh-wechat-code') };
+    const client = new AuthenticatedApiClient('http://localhost:3000', session, request);
+    await client.authenticate(identity);
+
+    await expect(client.submitItem(item.id, 'one-logical-command')).resolves.toEqual(item);
+
+    const submitRequests = request.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options.url.endsWith(`/api/items/${item.id}/submit`));
+    expect(submitRequests).toHaveLength(2);
+    expect(submitRequests[0]).toMatchObject({
+      header: {
+        Authorization: 'Bearer stale-token',
+        'Idempotency-Key': 'one-logical-command',
+      },
+    });
+    expect(submitRequests[1]).toMatchObject({
+      header: {
+        Authorization: 'Bearer fresh-token',
+        'Idempotency-Key': 'one-logical-command',
+      },
+    });
+  });
+
   it('uploads the selected file with the stored bearer token and returns its HTTP URL', async () => {
     const session = new Session(new MemoryStorage());
-    session.setAccessToken('customer-token');
+    session.setAccessToken('customer-token', 900);
     const uploadFile = vi.fn().mockResolvedValue({
       statusCode: 201,
       data: JSON.stringify({ url: 'https://images.example.test/uploaded.jpg' }),
@@ -157,7 +301,7 @@ describe('customer adapters', () => {
 
   it('rejects a successful upload response whose URL is not HTTP', async () => {
     const session = new Session(new MemoryStorage());
-    session.setAccessToken('customer-token');
+    session.setAccessToken('customer-token', 900);
     const client = new ImageUploadClient(
       'http://localhost:3000',
       session,

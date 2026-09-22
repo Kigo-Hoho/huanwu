@@ -28,14 +28,20 @@ function defaultNavigateToEdit(itemId: string): void {
   void Taro.navigateTo({ url: `/pages/items/create/index?id=${encodeURIComponent(itemId)}` });
 }
 
+function defaultNavigateToDetail(url: string): void {
+  void Taro.navigateTo({ url });
+}
+
 export function MyItemsPage({
   api = defaultApiClient,
   identityProvider = defaultIdentityProvider,
   navigateToEdit = defaultNavigateToEdit,
+  navigateToDetail = defaultNavigateToDetail,
 }: {
   api?: MyItemsApi;
   identityProvider?: IdentityCodeProvider;
   navigateToEdit?: (itemId: string) => void;
+  navigateToDetail?: (url: string) => void;
 }) {
   const [items, setItems] = useState<ItemView[]>([]);
   const [error, setError] = useState('');
@@ -68,6 +74,16 @@ export function MyItemsPage({
               <View key={item.id}>
                 <Text>{item.title}</Text>
                 <Text>￥{(item.referenceValueFen / 100).toFixed(2)}</Text>
+                <Button
+                  {...buttonRole}
+                  onClick={() =>
+                    navigateToDetail(
+                      `/pages/items/detail/index?id=${encodeURIComponent(item.id)}`,
+                    )
+                  }
+                >
+                  查看 {item.title}
+                </Button>
                 {item.status === 'REJECTED' ? (
                   <View>
                     <Text>{item.rejectReason ?? '未提供原因'}</Text>

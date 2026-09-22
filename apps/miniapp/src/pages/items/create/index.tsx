@@ -1,7 +1,7 @@
 import { CreateItemSchema, type ItemView } from '@barter/contracts';
-import { Button, Input, Label, Picker, Text, View } from '@tarojs/components';
+import { Button, Image, Input, Label, Picker, Text, View } from '@tarojs/components';
 import Taro from '@tarojs/taro';
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 
 import type { IdentityCodeProvider } from '../../../features/auth/identity-code.provider';
 import type { ImageUploadClient } from '../../../features/images/image-upload.client';
@@ -47,6 +47,12 @@ const conditionLabels = ['近乎全新', '状态良好', '有明显使用痕迹'
 const buttonRole = { role: 'button' } as unknown as ComponentProps<typeof Button>;
 const alertRole = { role: 'alert' } as unknown as ComponentProps<typeof Text>;
 
+interface PendingSubmission {
+  commandKey: string;
+  payload?: CreateItem;
+  draftId?: string;
+}
+
 export function yuanToFen(value: string): number | null {
   const normalized = value.trim();
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
@@ -89,6 +95,8 @@ export function CreateItemPage({
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const busyRef = useRef(false);
+  const pendingSubmissionRef = useRef<PendingSubmission | null>(null);
 
   const candidate = useMemo(() => {
     const referenceValueFen = yuanToFen(yuan);
@@ -138,35 +146,58 @@ export function CreateItemPage({
   async function selectImages(): Promise<void> {
     try {
       const paths = await dependencies.chooseImages();
-      setLocalImages(paths.slice(0, Math.max(0, 9 - existingImageUrls.length)));
+      setLocalImages((current) => [
+        ...current,
+        ...paths.slice(0, Math.max(0, 9 - existingImageUrls.length - current.length)),
+      ]);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '选择图片失败。');
     }
   }
 
+  const imagesLocked = busy || loadingItem || Boolean(pendingSubmissionRef.current?.draftId);
+
   async function submit(): Promise<void> {
-    if (!candidate || busy || loadingItem) return;
+    if ((!candidate && !pendingSubmissionRef.current?.draftId) || busyRef.current || loadingItem) {
+      return;
+    }
+    busyRef.current = true;
     setBusy(true);
     setError('');
     try {
+      const attempt = pendingSubmissionRef.current ?? {
+        commandKey: dependencies.createIdempotencyKey(),
+      };
+      pendingSubmissionRef.current = attempt;
       await dependencies.api.authenticate(dependencies.identityProvider);
-      const uploadedImageUrls = await Promise.all(
-        localImages.map((localPath) => dependencies.imageUpload.upload(localPath)),
-      );
-      const imageUrls = [...existingImageUrls, ...uploadedImageUrls];
-      const payload = CreateItemSchema.parse({ ...candidate, imageUrls });
-      const draft = editingItemId
-        ? await dependencies.api.updateItem(editingItemId, payload)
-        : await dependencies.api.createItem(payload);
+      if (!attempt.payload) {
+        if (!candidate) throw new Error('物品信息无效。');
+        const uploadedImageUrls = await Promise.all(
+          localImages.map((localPath) => dependencies.imageUpload.upload(localPath)),
+        );
+        const imageUrls = [...existingImageUrls, ...uploadedImageUrls];
+        attempt.payload = CreateItemSchema.parse({ ...candidate, imageUrls });
+      }
+      if (!attempt.draftId) {
+        const draft = editingItemId
+          ? await dependencies.api.updateItem(editingItemId, attempt.payload)
+          : await dependencies.api.createItem(attempt.payload);
+        attempt.draftId = draft.id;
+      }
       const item = await dependencies.api.submitItem(
-        draft.id,
-        dependencies.createIdempotencyKey(),
+        attempt.draftId,
+        attempt.commandKey,
       );
-      setSubmitted(item.status === 'PENDING_REVIEW');
+      if (item.status !== 'PENDING_REVIEW') {
+        throw new Error('服务器未确认进入等待审核状态。');
+      }
+      pendingSubmissionRef.current = null;
+      setSubmitted(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '提交失败，请稍后重试。');
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -225,7 +256,55 @@ export function CreateItemPage({
           onInput={(event) => setWantedText(event.detail.value)}
         />
       </Label>
-      <Button {...buttonRole} onClick={selectImages}>选择图片</Button>
+      {existingImageUrls.map((url, index) => (
+        <View key={url}>
+          <Image
+            {...({ 'aria-label': `已有图片 ${index + 1}` } as unknown as ComponentProps<
+              typeof Image
+            >)}
+            src={url}
+            mode='aspectFill'
+          />
+          <Button
+            {...({
+              role: 'button',
+              'aria-label': `移除已有图片 ${index + 1}`,
+            } as unknown as ComponentProps<typeof Button>)}
+            disabled={imagesLocked}
+            onClick={() => setExistingImageUrls((current) => current.filter((_, i) => i !== index))}
+          >
+            移除
+          </Button>
+        </View>
+      ))}
+      {localImages.map((path, index) => (
+        <View key={path}>
+          <Image
+            {...({ 'aria-label': `新选图片 ${index + 1}` } as unknown as ComponentProps<
+              typeof Image
+            >)}
+            src={path}
+            mode='aspectFill'
+          />
+          <Button
+            {...({
+              role: 'button',
+              'aria-label': `移除新选图片 ${index + 1}`,
+            } as unknown as ComponentProps<typeof Button>)}
+            disabled={imagesLocked}
+            onClick={() => setLocalImages((current) => current.filter((_, i) => i !== index))}
+          >
+            移除
+          </Button>
+        </View>
+      ))}
+      <Button
+        {...buttonRole}
+        disabled={imagesLocked || existingImageUrls.length + localImages.length >= 9}
+        onClick={selectImages}
+      >
+        选择图片
+      </Button>
       <Text>已选择 {existingImageUrls.length + localImages.length} / 9 张</Text>
       {error ? <Text {...alertRole}>{error}</Text> : null}
       <Button

@@ -55,4 +55,24 @@ describe('my items page', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑 REJECTED 物品' }));
     expect(navigateToEdit).toHaveBeenCalledWith('rejected-item');
   });
+
+  it('opens the owned-item detail route from a normal item row', async () => {
+    const active = item('ACTIVE', 'active/item');
+    const api = { listMyItems: vi.fn().mockResolvedValue([active]) };
+    const navigateToDetail = vi.fn();
+
+    render(
+      <MyItemsPage
+        api={api}
+        navigateToEdit={vi.fn()}
+        navigateToDetail={navigateToDetail}
+      />,
+    );
+
+    expect(await screen.findByText('ACTIVE 物品')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '查看 ACTIVE 物品' }));
+    expect(navigateToDetail).toHaveBeenCalledWith(
+      '/pages/items/detail/index?id=active%2Fitem',
+    );
+  });
 });

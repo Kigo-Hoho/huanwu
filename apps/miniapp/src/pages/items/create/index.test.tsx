@@ -127,6 +127,89 @@ describe('create item page', () => {
     expect(dependencies.imageUpload.upload).not.toHaveBeenCalled();
   });
 
+  it('retries a lost submit response with the same draft, uploads, and command key', async () => {
+    const dependencies = createDependencies();
+    dependencies.createIdempotencyKey = vi.fn(() => 'logical-submit-key');
+    dependencies.api.submitItem
+      .mockRejectedValueOnce(new Error('提交已处理但响应丢失'))
+      .mockResolvedValueOnce(pendingItem);
+    render(<CreateItemPage dependencies={dependencies} />);
+
+    fireEvent.input(screen.getByLabelText('物品名称'), {
+      target: { value: '九成新连衣裙' },
+    });
+    fireEvent.input(screen.getByLabelText('物品描述'), {
+      target: { value: '袖口轻微使用痕迹，照片已经完整展示。' },
+    });
+    fireEvent.input(screen.getByLabelText('参考价值（元）'), {
+      target: { value: '123.45' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '选择图片' }));
+    });
+    const submit = screen.getByRole('button', { name: '保存并提交审核' });
+
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('提交已处理但响应丢失');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存并提交审核' }));
+    });
+
+    expect(screen.getByText('等待审核')).toBeVisible();
+    expect(dependencies.imageUpload.upload).toHaveBeenCalledTimes(3);
+    expect(dependencies.api.createItem).toHaveBeenCalledTimes(1);
+    expect(dependencies.createIdempotencyKey).toHaveBeenCalledTimes(1);
+    expect(dependencies.api.submitItem).toHaveBeenNthCalledWith(
+      1,
+      pendingItem.id,
+      'logical-submit-key',
+    );
+    expect(dependencies.api.submitItem).toHaveBeenNthCalledWith(
+      2,
+      pendingItem.id,
+      'logical-submit-key',
+    );
+  });
+
+  it('ignores a second submit click while the first request is in flight', async () => {
+    const dependencies = createDependencies();
+    let finishSubmit: (item: ItemView) => void = () => undefined;
+    dependencies.api.submitItem.mockImplementation(
+      () => new Promise<ItemView>((resolve) => {
+        finishSubmit = resolve;
+      }),
+    );
+    render(<CreateItemPage dependencies={dependencies} />);
+
+    fireEvent.input(screen.getByLabelText('物品名称'), {
+      target: { value: '九成新连衣裙' },
+    });
+    fireEvent.input(screen.getByLabelText('物品描述'), {
+      target: { value: '袖口轻微使用痕迹，照片已经完整展示。' },
+    });
+    fireEvent.input(screen.getByLabelText('参考价值（元）'), {
+      target: { value: '123.45' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '选择图片' }));
+    });
+    const submit = screen.getByRole('button', { name: '保存并提交审核' });
+
+    await act(async () => {
+      fireEvent.click(submit);
+      fireEvent.click(submit);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dependencies.api.createItem).toHaveBeenCalledTimes(1);
+    expect(dependencies.api.submitItem).toHaveBeenCalledTimes(1);
+    await act(async () => finishSubmit(pendingItem));
+    expect(screen.getByText('等待审核')).toBeVisible();
+  });
+
   it('loads a rejected item and updates its draft before resubmitting', async () => {
     const dependencies = createDependencies();
     const rejected = {
@@ -160,6 +243,52 @@ describe('create item page', () => {
     expect(dependencies.api.submitItem).toHaveBeenCalledWith(
       rejected.id,
       'submit-item-test-key',
+    );
+    expect(screen.getByText('等待审核')).toBeVisible();
+  });
+
+  it('removes a rejected existing image and uploads its replacement before resubmitting', async () => {
+    const dependencies = createDependencies();
+    const rejected = {
+      ...pendingItem,
+      id: '00000000-0000-4000-8000-000000000088',
+      status: 'REJECTED' as const,
+      rejectReason: '九张图片中第一张与实物不符',
+      imageUrls: Array.from(
+        { length: 9 },
+        (_, index) => `https://images.example.test/wrong-${index + 1}.jpg`,
+      ),
+    };
+    dependencies.api.getMyItem.mockResolvedValue(rejected);
+    dependencies.api.updateItem.mockResolvedValue({ ...rejected, status: 'DRAFT' });
+    dependencies.chooseImages.mockResolvedValue(['replacement-local']);
+    dependencies.imageUpload.upload.mockResolvedValue(
+      'https://images.example.test/replacement.jpg',
+    );
+    render(<CreateItemPage dependencies={dependencies} itemId={rejected.id} />);
+
+    await act(async () => Promise.resolve());
+    expect(screen.getByLabelText('已有图片 1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '移除已有图片 1' }));
+    expect(screen.getByText('已选择 8 / 9 张')).toBeVisible();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '选择图片' }));
+    });
+    expect(screen.getByLabelText('新选图片 1')).toBeVisible();
+    expect(screen.getByText('已选择 9 / 9 张')).toBeVisible();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存并提交审核' }));
+    });
+
+    expect(dependencies.imageUpload.upload).toHaveBeenCalledTimes(1);
+    expect(dependencies.api.updateItem).toHaveBeenCalledWith(
+      rejected.id,
+      expect.objectContaining({
+        imageUrls: [
+          ...rejected.imageUrls.slice(1),
+          'https://images.example.test/replacement.jpg',
+        ],
+      }),
     );
     expect(screen.getByText('等待审核')).toBeVisible();
   });
