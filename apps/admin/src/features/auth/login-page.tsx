@@ -12,12 +12,17 @@ const { Title, Paragraph } = Typography;
 
 interface LoginPageProps {
   client?: AdminApiClient;
+  bootstrapError?: string | null;
   onAuthenticated: (user: OperatorUser) => void;
 }
 
-export function LoginPage({ client = apiClient, onAuthenticated }: LoginPageProps) {
+export function LoginPage({
+  client = apiClient,
+  bootstrapError = null,
+  onAuthenticated,
+}: LoginPageProps) {
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(bootstrapError);
 
   async function submit(values: { email: string; password: string }) {
     setSubmitting(true);

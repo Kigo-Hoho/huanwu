@@ -12,6 +12,7 @@ import { LoginPage } from '../features/auth/login-page';
 import { ItemReviewPage } from '../features/review/item-review-page';
 import { ReviewQueuePage } from '../features/review/review-queue-page';
 import {
+  ApiError,
   apiClient,
   loadStoredSession,
   type OperatorUser,
@@ -56,6 +57,7 @@ function RouterContent() {
   const [session, setSession] = useState<OperatorUser | null | undefined>(
     undefined,
   );
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -68,8 +70,17 @@ function RouterContent() {
         .then((user) => {
           if (active) setSession(user);
         })
-        .catch(() => {
-          if (active) setSession(null);
+        .catch((error: unknown) => {
+          if (!active) return;
+          apiClient.logout();
+          setBootstrapError(
+            error instanceof ApiError
+              ? error.status === 401
+                ? '登录已过期，请重新登录'
+                : `${error.code}：${error.message}`
+              : '无法恢复登录状态，请重新登录',
+          );
+          setSession(null);
         });
     }
     const expire = () => setSession(null);
@@ -96,7 +107,13 @@ function RouterContent() {
           session ? (
             <Navigate to="/reviews" replace />
           ) : (
-            <LoginPage onAuthenticated={setSession} />
+            <LoginPage
+              bootstrapError={bootstrapError}
+              onAuthenticated={(user) => {
+                setBootstrapError(null);
+                setSession(user);
+              }}
+            />
           )
         }
       />

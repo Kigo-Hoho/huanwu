@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ReviewApi } from '../../lib/api-client';
+import { ApiError, type ReviewApi } from '../../lib/api-client';
 import { pendingItem } from '../../test/fixtures';
 import { ItemReviewPage } from './item-review-page';
 import { ReviewQueuePage } from './review-queue-page';
@@ -76,5 +77,120 @@ describe('single-item review', () => {
     expect(screen.getByRole('region', { name: '审核历史' })).toHaveTextContent('提交审核');
     expect(screen.getByRole('button', { name: '审核通过' })).toBeVisible();
     expect(screen.getByLabelText('驳回原因')).toBeVisible();
+  });
+
+  it('replaces detail with the authoritative audit history after one rejection', async () => {
+    const rejectionReason = '图片模糊，请重新拍摄';
+    const rejectedDetail = {
+      ...pendingItem,
+      status: 'REJECTED' as const,
+      version: 4,
+      rejectReason: rejectionReason,
+      auditHistory: [
+        ...pendingItem.auditHistory,
+        {
+          id: '44444444-4444-4444-8444-444444444444',
+          actorId: '55555555-5555-4555-8555-555555555555',
+          actor: {
+            id: '55555555-5555-4555-8555-555555555555',
+            displayName: '审核员周女士',
+          },
+          action: 'ITEM_REJECTED',
+          entityType: 'Item',
+          entityId: pendingItem.id,
+          reason: rejectionReason,
+          requestId: 'request-review-reject',
+          before: { status: 'PENDING_REVIEW', version: 3 },
+          after: { status: 'REJECTED', version: 4, rejectReason: rejectionReason },
+          createdAt: '2026-09-22T10:15:00.000Z',
+        },
+      ],
+    };
+    const getReviewItem = vi
+      .fn()
+      .mockResolvedValueOnce(pendingItem)
+      .mockResolvedValueOnce(rejectedDetail);
+    const reviewItem = vi.fn().mockResolvedValue(rejectedDetail);
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter
+        initialEntries={['/reviews/11111111-1111-4111-8111-111111111111']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route
+            path="/reviews/:itemId"
+            element={
+              <ItemReviewPage
+                client={api({ getReviewItem, reviewItem })}
+                currentRoles={['REVIEWER']}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole('heading', { name: pendingItem.title });
+    await user.type(screen.getByLabelText('驳回原因'), rejectionReason);
+    await user.click(screen.getByRole('button', { name: '驳回物品' }));
+
+    expect(await screen.findByText('REJECTED')).toBeVisible();
+    expect(screen.getByText('驳回原因')).toBeVisible();
+    expect(screen.getByText(rejectionReason)).toBeVisible();
+    const auditHistory = screen.getByRole('region', { name: '审核历史' });
+    expect(auditHistory).toHaveTextContent('审核驳回');
+    expect(auditHistory).toHaveTextContent(`原因：${rejectionReason}`);
+    expect(reviewItem).toHaveBeenCalledOnce();
+    expect(getReviewItem).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the successful decision visible when its detail refresh fails', async () => {
+    const getReviewItem = vi
+      .fn()
+      .mockResolvedValueOnce(pendingItem)
+      .mockRejectedValueOnce(
+        new ApiError(500, {
+          code: 'VALIDATION_FAILED',
+          message: 'Detail unavailable',
+          requestId: 'request-detail-failed',
+        }),
+      );
+    const reviewItem = vi.fn().mockResolvedValue({
+      ...pendingItem,
+      status: 'ACTIVE' as const,
+      version: 4,
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter
+        initialEntries={['/reviews/11111111-1111-4111-8111-111111111111']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route
+            path="/reviews/:itemId"
+            element={
+              <ItemReviewPage
+                client={api({ getReviewItem, reviewItem })}
+                currentRoles={['REVIEWER']}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole('heading', { name: pendingItem.title });
+    await user.click(screen.getByRole('button', { name: '审核通过' }));
+
+    expect(await screen.findByText('ACTIVE')).toBeVisible();
+    expect(
+      screen.getByText(
+        '审核决定已保存，但最新审核详情加载失败：VALIDATION_FAILED：Detail unavailable',
+      ),
+    ).toBeVisible();
+    expect(reviewItem).toHaveBeenCalledOnce();
+    expect(getReviewItem).toHaveBeenCalledTimes(2);
   });
 });

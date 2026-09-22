@@ -49,6 +49,18 @@ export function ReviewActions({
     try {
       const updated = await client.reviewItem(item.id, input);
       onReviewed?.(updated);
+      try {
+        const refreshed = await client.getReviewItem(item.id);
+        onItemRefreshed?.(refreshed);
+      } catch (refreshError) {
+        setError(
+          `审核决定已保存，但最新审核详情加载失败：${
+            refreshError instanceof ApiError
+              ? `${refreshError.code}：${refreshError.message}`
+              : '请稍后重新打开物品详情'
+          }`,
+        );
+      }
     } catch (caught) {
       if (
         caught instanceof ApiError &&

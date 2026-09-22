@@ -152,6 +152,11 @@ export function ItemReviewPage({
               <Descriptions.Item label="期望交换" span={2}>
                 {item.wantedText || '未填写'}
               </Descriptions.Item>
+              {item.rejectReason ? (
+                <Descriptions.Item label="驳回原因" span={2}>
+                  {item.rejectReason}
+                </Descriptions.Item>
+              ) : null}
             </Descriptions>
           </Card>
 

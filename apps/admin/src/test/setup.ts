@@ -10,16 +10,23 @@ beforeAll(() => {
   });
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      dispatchEvent: () => false,
-    }),
+    value: (query: string) => {
+      const minWidth = query.match(/min-width:\s*(\d+)px/);
+      const maxWidth = query.match(/max-width:\s*(\d+)px/);
+      const matches =
+        (minWidth === null || window.innerWidth >= Number(minWidth[1])) &&
+        (maxWidth === null || window.innerWidth <= Number(maxWidth[1]));
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      };
+    },
   });
   Object.defineProperty(window, 'ResizeObserver', {
     writable: true,
