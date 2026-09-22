@@ -13,6 +13,7 @@ import { configureApp } from '../src/main.js';
 
 const jwtSecret = 'task-4-e2e-jwt-secret-with-sufficient-entropy';
 const customerOpenid = 'task-4-e2e-customer';
+const mixedOperatorOpenid = 'task-4-mixed-operator';
 
 function signToken(payload: {
   sub: string;
@@ -41,6 +42,7 @@ describe('authentication and role authorization', () => {
   let customerToken: string;
   let reviewerToken: string;
   let customerId: string;
+  let reviewerId: string;
   const originalJwtSecret = process.env.JWT_SECRET;
 
   beforeAll(async () => {
@@ -57,10 +59,13 @@ describe('authentication and role authorization', () => {
       .overrideProvider(WechatIdentityProvider)
       .useValue({
         exchangeCode: async (code: string) => {
-          if (code !== 'valid-customer-code') {
-            throw new Error('unexpected test identity code');
+          if (code === 'valid-customer-code') {
+            return { openid: customerOpenid };
           }
-          return { openid: customerOpenid };
+          if (code === 'mixed-operator-code') {
+            return { openid: mixedOperatorOpenid };
+          }
+          throw new Error('unexpected test identity code');
         },
       })
       .compile();
@@ -88,11 +93,25 @@ describe('authentication and role authorization', () => {
       })
       .expect(201);
     reviewerToken = reviewerResponse.body.accessToken as string;
+    reviewerId = reviewerResponse.body.user.id as string;
   });
 
   afterAll(async () => {
     if (prisma) {
       await prisma.user.deleteMany({ where: { wechatOpenid: customerOpenid } });
+      if (reviewerId) {
+        await prisma.user.update({
+          where: { id: reviewerId },
+          data: { disabledAt: null, wechatOpenid: null },
+        });
+        await prisma.userRole.upsert({
+          where: {
+            userId_role: { userId: reviewerId, role: 'REVIEWER' },
+          },
+          update: {},
+          create: { userId: reviewerId, role: 'REVIEWER' },
+        });
+      }
     }
     if (app) {
       await app.close();
@@ -170,6 +189,89 @@ describe('authentication and role authorization', () => {
         expect(body.roles).not.toContain('CUSTOMER');
         expect(body.roles).not.toContain('SUPER_ADMIN');
       });
+  });
+
+  it('revokes a previously issued operator token immediately when its role is removed', async () => {
+    await prisma.userRole.delete({
+      where: { userId_role: { userId: reviewerId, role: 'REVIEWER' } },
+    });
+    try {
+      await request(app.getHttpServer())
+        .get('/api/admin/session')
+        .set('Authorization', `Bearer ${reviewerToken}`)
+        .expect(403)
+        .expect(({ body }) => expect(body.code).toBe('FORBIDDEN'));
+    } finally {
+      await prisma.userRole.create({
+        data: { userId: reviewerId, role: 'REVIEWER' },
+      });
+    }
+  });
+
+  it('invalidates a previously issued token immediately when the operator is disabled', async () => {
+    await prisma.user.update({
+      where: { id: reviewerId },
+      data: { disabledAt: new Date() },
+    });
+    try {
+      await request(app.getHttpServer())
+        .get('/api/admin/session')
+        .set('Authorization', `Bearer ${reviewerToken}`)
+        .expect(401)
+        .expect(({ body }) => expect(body.code).toBe('AUTH_REQUIRED'));
+    } finally {
+      await prisma.user.update({
+        where: { id: reviewerId },
+        data: { disabledAt: null },
+      });
+    }
+  });
+
+  it('rejects admin login for an identity that also has a WeChat openid', async () => {
+    await prisma.user.update({
+      where: { id: reviewerId },
+      data: { wechatOpenid: mixedOperatorOpenid },
+    });
+    try {
+      await request(app.getHttpServer())
+        .post('/api/auth/admin/password')
+        .send({
+          email: 'reviewer@barter.local',
+          password: process.env.ADMIN_SEED_PASSWORD,
+        })
+        .expect(403)
+        .expect(({ body }) => expect(body.code).toBe('FORBIDDEN'));
+    } finally {
+      await prisma.user.update({
+        where: { id: reviewerId },
+        data: { wechatOpenid: null },
+      });
+    }
+  });
+
+  it('does not turn an operator identity into a customer through WeChat login', async () => {
+    await prisma.user.update({
+      where: { id: reviewerId },
+      data: { wechatOpenid: mixedOperatorOpenid },
+    });
+    try {
+      await request(app.getHttpServer())
+        .post('/api/auth/wechat')
+        .send({ code: 'mixed-operator-code' })
+        .expect(403)
+        .expect(({ body }) => expect(body.code).toBe('FORBIDDEN'));
+
+      await expect(
+        prisma.userRole.findUnique({
+          where: { userId_role: { userId: reviewerId, role: 'CUSTOMER' } },
+        }),
+      ).resolves.toBeNull();
+    } finally {
+      await prisma.user.update({
+        where: { id: reviewerId },
+        data: { wechatOpenid: null },
+      });
+    }
   });
 
   it('rejects an incorrect operator password', async () => {

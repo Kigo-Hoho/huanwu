@@ -14,7 +14,7 @@ export type AuthenticatedRequest = Request & { user: AuthenticatedUser };
 export class JwtAuthGuard implements CanActivate {
   constructor(private readonly authService: AuthService) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const authorization = request.headers.authorization;
     if (!authorization?.startsWith('Bearer ')) {
@@ -25,7 +25,8 @@ export class JwtAuthGuard implements CanActivate {
     if (!token) {
       throw new UnauthorizedException('Bearer access token is required');
     }
-    request.user = this.authService.verifyAccessToken(token);
+    const principal = this.authService.verifyAccessToken(token);
+    request.user = await this.authService.rehydrateAuthenticatedUser(principal);
     return true;
   }
 }

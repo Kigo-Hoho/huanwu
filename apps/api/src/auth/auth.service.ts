@@ -23,10 +23,14 @@ export interface AuthenticatedUser {
   roles: Role[];
 }
 
+export interface AuthenticatedPrincipal extends AuthenticatedUser {
+  type: 'CUSTOMER' | 'OPERATOR';
+}
+
 interface AccessTokenClaims {
   sub: string;
   roles: Role[];
-  type: 'CUSTOMER' | 'OPERATOR';
+  type: AuthenticatedPrincipal['type'];
   iat: number;
   exp: number;
 }
@@ -98,9 +102,12 @@ export class AuthService {
     }
 
     const storedRoles = credential.user.roles.map(({ role }) => role as Role);
-    if (storedRoles.includes('CUSTOMER')) {
+    if (
+      credential.user.wechatOpenid !== null ||
+      storedRoles.includes('CUSTOMER')
+    ) {
       throw new ForbiddenException(
-        'Operator accounts cannot also hold the customer role',
+        'Operator accounts cannot also hold a customer identity',
       );
     }
     const roles = storedRoles.filter((role) => operatorRoles.includes(role));
@@ -111,7 +118,7 @@ export class AuthService {
     return this.createSession({ id: credential.user.id, roles }, 'OPERATOR');
   }
 
-  verifyAccessToken(token: string): AuthenticatedUser {
+  verifyAccessToken(token: string): AuthenticatedPrincipal {
     const parts = token.split('.');
     if (parts.length !== 3) {
       throw new UnauthorizedException('Invalid access token');
@@ -152,7 +159,45 @@ export class AuthService {
       throw new UnauthorizedException('Access token has expired');
     }
 
-    return { id: payload.sub, roles: payload.roles };
+    return { id: payload.sub, roles: payload.roles, type: payload.type };
+  }
+
+  async rehydrateAuthenticatedUser(
+    principal: AuthenticatedPrincipal,
+  ): Promise<AuthenticatedUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: principal.id },
+      include: { adminCredential: true, roles: true },
+    });
+    if (!user || user.disabledAt !== null) {
+      throw new UnauthorizedException('Account is unavailable');
+    }
+
+    const storedRoles = user.roles.map(({ role }) => role as Role);
+    if (principal.type === 'CUSTOMER') {
+      if (
+        user.wechatOpenid === null ||
+        user.adminCredential !== null ||
+        !storedRoles.includes('CUSTOMER') ||
+        storedRoles.some((role) => operatorRoles.includes(role))
+      ) {
+        throw new UnauthorizedException('Customer identity is unavailable');
+      }
+      return { id: user.id, roles: ['CUSTOMER'] };
+    }
+
+    if (
+      user.wechatOpenid !== null ||
+      user.adminCredential === null ||
+      storedRoles.includes('CUSTOMER')
+    ) {
+      throw new UnauthorizedException('Operator identity is unavailable');
+    }
+
+    return {
+      id: user.id,
+      roles: storedRoles.filter((role) => operatorRoles.includes(role)),
+    };
   }
 
   private createSession(
