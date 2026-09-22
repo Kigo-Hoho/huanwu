@@ -6,9 +6,11 @@ import { AuthModule } from './auth/auth.module.js';
 import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthController } from './health/health.controller.js';
+import { ItemsModule } from './items/items.module.js';
+import { StorageModule } from './storage/storage.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule],
   controllers: [HealthController],
   providers: [
     {

@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
-import type { ApiErrorBody, ApiErrorCode } from '@barter/contracts';
+import {
+  ApiErrorCodes,
+  type ApiErrorBody,
+  type ApiErrorCode,
+} from '@barter/contracts';
 import {
   ArgumentsHost,
   Catch,
@@ -35,22 +39,49 @@ function exceptionMessage(exception: unknown): string {
       : exception.message;
 }
 
+function explicitCode(exception: HttpException): ApiErrorCode | undefined {
+  const body = exception.getResponse();
+  if (typeof body !== 'object' || body === null || !('code' in body)) {
+    return undefined;
+  }
+  return ApiErrorCodes.includes(body.code as ApiErrorCode)
+    ? (body.code as ApiErrorCode)
+    : undefined;
+}
+
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<Request>();
     const response = context.getResponse<Response>();
-    const status =
+    const isMulterError =
+      typeof exception === 'object' &&
+      exception !== null &&
+      'name' in exception &&
+      exception.name === 'MulterError';
+    const exceptionStatus =
       exception instanceof HttpException
         ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status = exception instanceof HttpException
+      ? exceptionStatus === HttpStatus.PAYLOAD_TOO_LARGE
+        ? HttpStatus.BAD_REQUEST
+        : exceptionStatus
+      : isMulterError
+        ? HttpStatus.BAD_REQUEST
         : HttpStatus.INTERNAL_SERVER_ERROR;
     const requestIdHeader = request.headers['x-request-id'];
     const requestId =
       (Array.isArray(requestIdHeader) ? requestIdHeader[0] : requestIdHeader) ??
       randomUUID();
     const body: ApiErrorBody = {
-      code: statusCodes[status] ?? 'VALIDATION_FAILED',
+      code:
+        (exception instanceof HttpException
+          ? explicitCode(exception)
+          : undefined) ??
+        statusCodes[status] ??
+        'VALIDATION_FAILED',
       message: exceptionMessage(exception),
       requestId,
     };
