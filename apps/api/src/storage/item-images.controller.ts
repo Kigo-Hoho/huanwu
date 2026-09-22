@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Inject,
+  NotFoundException,
   Param,
   Post,
   Res,
@@ -23,7 +24,10 @@ import {
   IMAGE_STORAGE_PORT,
   type ImageStoragePort,
 } from './image-storage.port.js';
-import { LocalImageStorageAdapter } from './local-image-storage.adapter.js';
+import {
+  isLocalImageStorageEnvironment,
+  LocalImageStorageAdapter,
+} from './local-image-storage.adapter.js';
 
 interface UploadedImage {
   buffer: Buffer;
@@ -61,6 +65,9 @@ export class ItemImagesController {
     @Param('filename') filename: string,
     @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
+    if (!isLocalImageStorageEnvironment()) {
+      throw new NotFoundException('Image was not found');
+    }
     const stored = await this.localStorage.read(filename);
     response.setHeader('Content-Type', stored.contentType);
     response.setHeader('X-Content-Type-Options', 'nosniff');

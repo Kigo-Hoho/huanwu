@@ -12,6 +12,7 @@ import type { ImageStoragePort, SaveImageInput } from './image-storage.port.js';
 
 const maximumImageBytes = 8 * 1024 * 1024;
 const defaultPublicBaseUrl = 'http://localhost:3000/api/uploads/item-images/files';
+const localStorageEnvironments = new Set(['development', 'test']);
 
 interface ImageFormat {
   contentType: 'image/jpeg' | 'image/png' | 'image/webp';
@@ -60,14 +61,22 @@ function validateBaseUrl(value: string): string {
   return parsed.toString().replace(/\/$/, '');
 }
 
+export function isLocalImageStorageEnvironment(
+  nodeEnv = process.env.NODE_ENV,
+): boolean {
+  return nodeEnv !== undefined && localStorageEnvironments.has(nodeEnv);
+}
+
 @Injectable()
 export class LocalImageStorageAdapter implements ImageStoragePort {
   readonly directory: string;
   private readonly publicBaseUrl: string;
 
   constructor() {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('Local image storage cannot be selected in production');
+    if (!isLocalImageStorageEnvironment()) {
+      throw new Error(
+        'Local image storage is only available in development or test',
+      );
     }
     this.directory = resolve(
       process.env.LOCAL_IMAGE_STORAGE_DIR ?? '.local/item-images',

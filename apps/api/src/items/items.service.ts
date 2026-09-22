@@ -79,11 +79,13 @@ export class ItemsService {
         throw invalidState('Only draft or rejected items can be edited');
       }
 
-      if (input.imageUrls) {
-        await tx.itemImage.deleteMany({ where: { itemId } });
-      }
-      const item = await tx.item.update({
-        where: { id: itemId },
+      const update = await tx.item.updateMany({
+        where: {
+          id: itemId,
+          ownerId,
+          status: { in: ['DRAFT', 'REJECTED'] },
+          version: existing.version,
+        },
         data: {
           title: input.title,
           description: input.description,
@@ -93,15 +95,29 @@ export class ItemsService {
           status: existing.status === 'REJECTED' ? 'DRAFT' : undefined,
           rejectReason: existing.status === 'REJECTED' ? null : undefined,
           version: { increment: 1 },
-          images: input.imageUrls
-            ? {
-                create: input.imageUrls.map((url, sortOrder) => ({
-                  url,
-                  sortOrder,
-                })),
-              }
-            : undefined,
         },
+      });
+      if (update.count !== 1) {
+        const current = await tx.item.findFirst({
+          where: { id: itemId, ownerId },
+          select: { id: true },
+        });
+        if (!current) throw itemNotFound();
+        throw invalidState('Only draft or rejected items can be edited');
+      }
+
+      if (input.imageUrls) {
+        await tx.itemImage.deleteMany({ where: { itemId } });
+        await tx.itemImage.createMany({
+          data: input.imageUrls.map((url, sortOrder) => ({
+            itemId,
+            url,
+            sortOrder,
+          })),
+        });
+      }
+      const item = await tx.item.findUniqueOrThrow({
+        where: { id: itemId },
         include: { images: true },
       });
       return mapItem(item);

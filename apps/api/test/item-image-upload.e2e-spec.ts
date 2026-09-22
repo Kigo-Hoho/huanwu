@@ -7,11 +7,12 @@ import { CreateItemSchema } from '@barter/contracts';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { configureApp } from '../src/main.js';
+import { ItemImagesController } from '../src/storage/item-images.controller.js';
 import { LocalImageStorageAdapter } from '../src/storage/local-image-storage.adapter.js';
 
 const jwtSecret = 'task-5-e2e-jwt-secret-with-sufficient-entropy';
@@ -217,11 +218,52 @@ describe('item image uploads', () => {
       .expect(({ body }) => expect(body.code).toBe('FORBIDDEN'));
   });
 
-  it('fails construction when local storage is selected in production', () => {
+  it.each(['development', 'test'])('allows local storage in %s', (nodeEnv) => {
     const originalNodeEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
+    process.env.NODE_ENV = nodeEnv;
     try {
-      expect(() => new LocalImageStorageAdapter()).toThrow(/production/i);
+      expect(() => new LocalImageStorageAdapter()).not.toThrow();
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  it.each([undefined, 'staging', 'qa', 'production'])(
+    'rejects local storage outside development/test when NODE_ENV is %s',
+    (nodeEnv) => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      if (nodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = nodeEnv;
+      try {
+        expect(() => new LocalImageStorageAdapter()).toThrow(/development|test/i);
+      } finally {
+        if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = originalNodeEnv;
+      }
+    },
+  );
+
+  it('does not serve local files outside development or test', async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'staging';
+    const read = vi.fn().mockResolvedValue({
+      bytes: Buffer.from('should-not-be-read'),
+      contentType: 'image/png',
+    });
+    const controller = new ItemImagesController(
+      { save: vi.fn() } as never,
+      { read } as never,
+    );
+    const response = { setHeader: vi.fn() };
+    try {
+      await expect(
+        controller.serve(
+          '00000000-0000-4000-8000-000000000001.png',
+          response as never,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(read).not.toHaveBeenCalled();
     } finally {
       if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = originalNodeEnv;
