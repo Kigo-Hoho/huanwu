@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CUSTOMER
+  OPERATIONS
+  REVIEWER
+  SUPER_ADMIN
+}
+
+enum ItemCondition {
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+enum ItemStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  REJECTED
+  INACTIVE
+}
+
+model User {
+  id              String              @id @default(uuid()) @db.Uuid
+  wechatOpenid    String?             @unique
+  displayName     String?
+  disabledAt      DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  roles           UserRole[]
+  adminCredential AdminCredential?
+  items           Item[]
+  auditLogs       AuditLog[]
+  idempotencyKeys IdempotencyRecord[]
+}
+
+model UserRole {
+  userId    String   @db.Uuid
+  role      Role
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+  @@index([role])
+}
+
+model AdminCredential {
+  userId       String   @id @db.Uuid
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Item {
+  id                String        @id @default(uuid()) @db.Uuid
+  ownerId           String        @db.Uuid
+  title             String
+  description       String
+  referenceValueFen Int
+  condition         ItemCondition
+  status            ItemStatus    @default(DRAFT)
+  wantedText        String
+  rejectReason      String?
+  version           Int           @default(1)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  owner             User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  images            ItemImage[]
+
+  @@index([ownerId, status])
+  @@index([status, updatedAt])
+}
+
+model ItemImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  itemId    String   @db.Uuid
+  url       String
+  sortOrder Int
+  createdAt DateTime @default(now())
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, sortOrder])
+  @@index([itemId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String
+  reason     String?
+  requestId  String?
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorId     String   @db.Uuid
+  commandName String
+  key         String
+  response    Json
+  createdAt   DateTime @default(now())
+  actor       User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@unique([actorId, commandName, key])
+  @@index([actorId, createdAt])
+}
