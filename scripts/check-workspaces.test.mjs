@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -25,4 +25,19 @@ test('root quality gates run before product workspaces are added', async () => {
       },
     );
   }
+});
+
+test('root typecheck succeeds before contracts have been built', async () => {
+  await rm(new URL('../packages/contracts/dist/', import.meta.url), {
+    force: true,
+    recursive: true,
+  });
+
+  await execFileAsync(
+    isWindows ? process.env.ComSpec ?? 'cmd.exe' : 'npm',
+    isWindows ? ['/d', '/s', '/c', 'npm run typecheck'] : ['run', 'typecheck'],
+    {
+      cwd: fileURLToPath(new URL('../', import.meta.url)),
+    },
+  );
 });
