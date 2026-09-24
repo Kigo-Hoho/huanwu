@@ -1,5 +1,7 @@
+import type { ApiErrorCode } from '@barter/contracts';
 import {
   BadGatewayException,
+  GatewayTimeoutException,
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -15,6 +17,16 @@ export interface CustomerIdentityProvider {
 }
 
 export const CUSTOMER_IDENTITY_PROVIDER = Symbol('CUSTOMER_IDENTITY_PROVIDER');
+const identityExchangeTimeoutMs = 5_000;
+const identityProviderUnavailableCode: ApiErrorCode =
+  'IDENTITY_PROVIDER_UNAVAILABLE';
+
+function identityProviderError(message: string) {
+  return {
+    code: identityProviderUnavailableCode,
+    message,
+  };
+}
 
 @Injectable()
 export class WechatIdentityProvider implements CustomerIdentityProvider {
@@ -23,7 +35,7 @@ export class WechatIdentityProvider implements CustomerIdentityProvider {
     const appSecret = process.env.WECHAT_APP_SECRET;
     if (!appId?.trim() || !appSecret?.trim()) {
       throw new ServiceUnavailableException(
-        'WeChat identity provider is not configured',
+        identityProviderError('WeChat identity provider is not configured'),
       );
     }
 
@@ -33,18 +45,58 @@ export class WechatIdentityProvider implements CustomerIdentityProvider {
       js_code: code,
       grant_type: 'authorization_code',
     });
-    const response = await fetch(
-      `https://api.weixin.qq.com/sns/jscode2session?${query.toString()}`,
+    const abortController = new AbortController();
+    const timeout = setTimeout(
+      () => abortController.abort(),
+      identityExchangeTimeoutMs,
     );
-    if (!response.ok) {
-      throw new BadGatewayException('WeChat identity exchange failed');
-    }
+    try {
+      let response: Response;
+      try {
+        response = await fetch(
+          `https://api.weixin.qq.com/sns/jscode2session?${query.toString()}`,
+          { signal: abortController.signal },
+        );
+      } catch {
+        if (abortController.signal.aborted) {
+          throw new GatewayTimeoutException(
+            identityProviderError('WeChat identity exchange timed out'),
+          );
+        }
+        throw new BadGatewayException(
+          identityProviderError('WeChat identity exchange failed'),
+        );
+      }
+      if (!response.ok) {
+        throw new BadGatewayException(
+          identityProviderError('WeChat identity exchange failed'),
+        );
+      }
 
-    const result = (await response.json()) as WechatCodeExchangeResponse;
-    if (typeof result.openid !== 'string' || !result.openid) {
-      throw new BadGatewayException('WeChat identity exchange was rejected');
-    }
+      let result: WechatCodeExchangeResponse;
+      try {
+        result = (await response.json()) as WechatCodeExchangeResponse;
+      } catch {
+        if (abortController.signal.aborted) {
+          throw new GatewayTimeoutException(
+            identityProviderError('WeChat identity exchange timed out'),
+          );
+        }
+        throw new BadGatewayException(
+          identityProviderError(
+            'WeChat identity exchange returned invalid data',
+          ),
+        );
+      }
+      if (typeof result.openid !== 'string' || !result.openid) {
+        throw new BadGatewayException(
+          identityProviderError('WeChat identity exchange was rejected'),
+        );
+      }
 
-    return { openid: result.openid };
+      return { openid: result.openid };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

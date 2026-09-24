@@ -4,6 +4,7 @@ export const ApiErrorCodes = [
   'ITEM_NOT_FOUND',
   'ITEM_INVALID_STATE',
   'ITEM_VERSION_CONFLICT',
+  'IDENTITY_PROVIDER_UNAVAILABLE',
   'VALIDATION_FAILED',
 ] as const;
 

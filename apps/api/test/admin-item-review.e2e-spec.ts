@@ -332,6 +332,39 @@ describe('operator item review', () => {
     ).toBe(1);
   });
 
+  it('allows exactly one of two simultaneous reviews for the same version', async () => {
+    const item = await createItem();
+
+    const responses = await Promise.all([
+      review(item.id, reviewerOneToken, {
+        decision: 'APPROVE',
+        expectedVersion: 1,
+      }),
+      review(item.id, reviewerTwoToken, {
+        decision: 'REJECT',
+        expectedVersion: 1,
+        reason: '图片信息不足',
+      }),
+    ]);
+
+    const successResponses = responses.filter(({ status }) => status === 200);
+    const conflictResponses = responses.filter(({ status }) => status === 409);
+    expect(successResponses).toHaveLength(1);
+    expect(conflictResponses).toHaveLength(1);
+    expect(conflictResponses[0]?.body).toMatchObject({
+      code: 'ITEM_VERSION_CONFLICT',
+    });
+
+    await expect(
+      prisma.item.findUniqueOrThrow({ where: { id: item.id } }),
+    ).resolves.toMatchObject({ version: 2 });
+    expect(
+      await prisma.auditLog.count({
+        where: { entityType: 'Item', entityId: item.id },
+      }),
+    ).toBe(1);
+  });
+
   it('rejects review of a non-pending item as an invalid state', async () => {
     const item = await createItem('DRAFT');
 

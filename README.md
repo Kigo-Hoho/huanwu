@@ -42,7 +42,7 @@ npm run dev
 
 该命令同时启动 API、H5 开发构建和管理端。也可分别运行：
 
-- API：`npm run dev --workspace @barter/api`，默认 `http://localhost:3000/api`
+- API：`npx --no-install cross-env NODE_ENV=development npm run dev --workspace @barter/api`，默认 `http://localhost:3000/api`
 - 管理端：`npm run dev --workspace @barter/admin`，默认 `http://localhost:5173`
 - H5：`npm run dev:h5 --workspace @barter/miniapp`
 
