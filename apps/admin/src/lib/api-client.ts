@@ -161,6 +161,10 @@ export function createApiClient(options: {
   const fetchImpl =
     options.fetchImpl ??
     ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
+  let bootstrapFlight: {
+    accessToken: string;
+    promise: Promise<OperatorUser | null>;
+  } | null = null;
 
   async function request<T>(
     path: string,
@@ -231,13 +235,27 @@ export function createApiClient(options: {
     },
 
     async bootstrapSession() {
-      if (!loadStoredSession()) return null;
-      const user = await request<OperatorUser>('/admin/session');
-      if (!isOperatorUser(user)) {
-        clearSessionAndNotify();
-        return null;
+      const stored = loadStoredSession();
+      if (!stored) return null;
+      if (bootstrapFlight?.accessToken === stored.accessToken) {
+        return bootstrapFlight.promise;
       }
-      return user;
+      const promise = (async (): Promise<OperatorUser | null> => {
+        const user = await request<OperatorUser>('/admin/session');
+        if (!isOperatorUser(user)) {
+          clearSessionAndNotify();
+          return null;
+        }
+        return user;
+      })();
+      bootstrapFlight = { accessToken: stored.accessToken, promise };
+      try {
+        return await promise;
+      } finally {
+        if (bootstrapFlight?.promise === promise) {
+          bootstrapFlight = null;
+        }
+      }
     },
 
     logout() {
