@@ -3,13 +3,17 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { RoleValues, type Role } from '@barter/contracts';
 import {
   ForbiddenException,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import argon2 from 'argon2';
 
 import { PrismaService } from '../database/prisma.service.js';
-import { WechatIdentityProvider } from './wechat-identity.provider.js';
+import {
+  CUSTOMER_IDENTITY_PROVIDER,
+  type CustomerIdentityProvider,
+} from './wechat-identity.provider.js';
 
 const operatorRoles: readonly Role[] = [
   'OPERATIONS',
@@ -52,12 +56,14 @@ function isRole(value: unknown): value is Role {
 @Injectable()
 export class AuthService {
   constructor(
+    @Inject(PrismaService)
     private readonly prisma: PrismaService,
-    private readonly wechatIdentityProvider: WechatIdentityProvider,
+    @Inject(CUSTOMER_IDENTITY_PROVIDER)
+    private readonly customerIdentityProvider: CustomerIdentityProvider,
   ) {}
 
   async authenticateWechat(code: string): Promise<AuthSession> {
-    const { openid } = await this.wechatIdentityProvider.exchangeCode(code);
+    const { openid } = await this.customerIdentityProvider.exchangeCode(code);
     const user = await this.prisma.$transaction(async (tx) => {
       const identity = await tx.user.upsert({
         where: { wechatOpenid: openid },

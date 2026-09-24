@@ -7,6 +7,7 @@
     "build": "npm run build:weapp",
     "build:weapp": "taro build --type weapp",
     "build:h5": "taro build --type h5",
+    "dev:h5": "taro build --type h5 --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0"

@@ -5,11 +5,12 @@ import {
   type IdentityCodeProvider,
 } from '../features/auth/identity-code.provider';
 import { Session } from '../features/auth/session';
+import { defaultSessionStorage } from '../features/auth/session-storage';
 import { ImageUploadClient } from '../features/images/image-upload.client';
 import { AuthenticatedApiClient } from './api-client';
 
 const baseUrl = typeof __API_BASE_URL__ === 'string' ? __API_BASE_URL__ : 'http://localhost:3000';
-const session = new Session();
+const session = new Session(defaultSessionStorage);
 
 export const defaultIdentityProvider: IdentityCodeProvider = createIdentityCodeProvider({
   provider: typeof __IDENTITY_PROVIDER__ === 'string' ? __IDENTITY_PROVIDER__ : 'taro',

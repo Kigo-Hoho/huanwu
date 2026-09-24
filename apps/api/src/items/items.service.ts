@@ -5,6 +5,7 @@ import {
 } from '@barter/contracts';
 import {
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -43,7 +44,9 @@ function isUniqueConstraintError(error: unknown): boolean {
 @Injectable()
 export class ItemsService {
   constructor(
+    @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(AuditService)
     private readonly auditService: AuditService,
   ) {}
 

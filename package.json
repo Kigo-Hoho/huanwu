@@ -10,11 +10,22 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "cross-env NODE_ENV=development TARO_ENV=h5 concurrently --kill-others-on-fail --names api,miniapp,admin \"npm run dev --workspace @barter/api\" \"npm run dev:h5 --workspace @barter/miniapp\" \"npm run dev --workspace @barter/admin -- --host 127.0.0.1\"",
+    "db:migrate": "npm run db:migrate:deploy --workspace @barter/api",
+    "db:seed": "npm run db:seed --workspace @barter/api",
+    "db:reset": "npm run db:reset --workspace @barter/api",
+    "pree2e": "node scripts/prepare-e2e.mjs",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
     "test": "node --test scripts/check-workspaces.test.mjs && npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "node --check scripts/check-workspaces.mjs && node --check scripts/check-workspaces.test.mjs && npm run lint --workspaces --if-present",
+    "lint": "node --check scripts/check-workspaces.mjs && node --check scripts/check-workspaces.test.mjs && node --check scripts/prepare-e2e.mjs && node --check scripts/serve-static.mjs && npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "concurrently": "9.2.1",
+    "cross-env": "10.1.0"
   },
   "allowScripts": {
     "argon2@0.45.1": true,

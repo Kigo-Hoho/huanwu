@@ -6,6 +6,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -25,7 +26,10 @@ import { ItemReviewService } from './item-review.service.js';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('REVIEWER', 'SUPER_ADMIN')
 export class AdminItemsController {
-  constructor(private readonly itemReviewService: ItemReviewService) {}
+  constructor(
+    @Inject(ItemReviewService)
+    private readonly itemReviewService: ItemReviewService,
+  ) {}
 
   @Get()
   list(@Query('status') status?: string) {

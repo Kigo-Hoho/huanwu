@@ -2,6 +2,7 @@ import { ReviewItemSchema, type ItemView, type Role } from '@barter/contracts';
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -56,7 +57,9 @@ function mapOperatorItem(item: OperatorItem): ItemView & {
 @Injectable()
 export class ItemReviewService {
   constructor(
+    @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(AuditService)
     private readonly auditService: AuditService,
   ) {}
 

@@ -39,6 +39,7 @@ export class ItemImagesController {
   constructor(
     @Inject(IMAGE_STORAGE_PORT)
     private readonly storage: ImageStoragePort,
+    @Inject(LocalImageStorageAdapter)
     private readonly localStorage: LocalImageStorageAdapter,
   ) {}
 

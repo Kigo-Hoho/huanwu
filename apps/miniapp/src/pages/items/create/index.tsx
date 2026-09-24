@@ -12,6 +12,7 @@ import {
   defaultIdentityProvider,
   defaultImageUploadClient,
 } from '../../../lib/default-services';
+import { AcceptanceImageInput } from './acceptance-image-input';
 
 type CreateItem = Pick<
   ItemView,
@@ -158,6 +159,14 @@ export function CreateItemPage({
 
   const imagesLocked = busy || loadingItem || Boolean(pendingSubmissionRef.current?.draftId);
 
+  function appendLocalImages(paths: string[]): void {
+    setLocalImages((current) => [
+      ...current,
+      ...paths.slice(0, Math.max(0, 9 - existingImageUrls.length - current.length)),
+    ]);
+    setError('');
+  }
+
   async function submit(): Promise<void> {
     if ((!candidate && !pendingSubmissionRef.current?.draftId) || busyRef.current || loadingItem) {
       return;
@@ -205,7 +214,8 @@ export function CreateItemPage({
   if (submitted) {
     return (
       <View>
-        <Text>等待审核</Text>
+        <Text>等待平台审核</Text>
+        <Text>PENDING_REVIEW</Text>
       </View>
     );
   }
@@ -305,6 +315,10 @@ export function CreateItemPage({
       >
         选择图片
       </Button>
+      <AcceptanceImageInput
+        disabled={imagesLocked || existingImageUrls.length + localImages.length >= 9}
+        onSelect={appendLocalImages}
+      />
       <Text>已选择 {existingImageUrls.length + localImages.length} / 9 张</Text>
       {error ? <Text {...alertRole}>{error}</Text> : null}
       <Button

@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 
 const identityProvider = process.env.TARO_APP_IDENTITY_PROVIDER ?? 'taro';
 const target = process.env.TARO_ENV ?? 'weapp';
-const buildEnvironment = process.env.NODE_ENV ?? 'development';
+const buildEnvironment =
+  process.env.TARO_APP_ENVIRONMENT ?? process.env.NODE_ENV ?? 'development';
 
 if (!['taro', 'acceptance'].includes(identityProvider)) {
   throw new Error(`Unknown identity provider: ${identityProvider}`);
@@ -11,8 +12,10 @@ if (!['taro', 'acceptance'].includes(identityProvider)) {
 if (identityProvider === 'acceptance' && target !== 'h5') {
   throw new Error('The acceptance identity provider is available only for explicit H5 builds.');
 }
-if (identityProvider === 'acceptance' && buildEnvironment === 'production') {
-  throw new Error('The acceptance identity provider must never be used in production.');
+if (identityProvider === 'acceptance' && buildEnvironment !== 'acceptance') {
+  throw new Error(
+    'The acceptance identity provider requires TARO_APP_ENVIRONMENT=acceptance and must never be used in production.',
+  );
 }
 
 export default defineConfig<'webpack5'>(async (_merge, { command, mode }) => {

@@ -89,7 +89,7 @@ describe('create item page', () => {
       fireEvent.click(submit);
     });
 
-    expect(screen.getByText('等待审核')).toBeVisible();
+    expect(screen.getByText('等待平台审核')).toBeVisible();
     expect(dependencies.identityProvider.getCode).toHaveBeenCalledTimes(1);
     expect(dependencies.imageUpload.upload).toHaveBeenCalledTimes(3);
     expect(dependencies.api.createItem).toHaveBeenCalledWith({
@@ -157,7 +157,7 @@ describe('create item page', () => {
       fireEvent.click(screen.getByRole('button', { name: '保存并提交审核' }));
     });
 
-    expect(screen.getByText('等待审核')).toBeVisible();
+    expect(screen.getByText('等待平台审核')).toBeVisible();
     expect(dependencies.imageUpload.upload).toHaveBeenCalledTimes(3);
     expect(dependencies.api.createItem).toHaveBeenCalledTimes(1);
     expect(dependencies.createIdempotencyKey).toHaveBeenCalledTimes(1);
@@ -207,7 +207,7 @@ describe('create item page', () => {
     expect(dependencies.api.createItem).toHaveBeenCalledTimes(1);
     expect(dependencies.api.submitItem).toHaveBeenCalledTimes(1);
     await act(async () => finishSubmit(pendingItem));
-    expect(screen.getByText('等待审核')).toBeVisible();
+    expect(screen.getByText('等待平台审核')).toBeVisible();
   });
 
   it('loads a rejected item and updates its draft before resubmitting', async () => {
@@ -244,7 +244,7 @@ describe('create item page', () => {
       rejected.id,
       'submit-item-test-key',
     );
-    expect(screen.getByText('等待审核')).toBeVisible();
+    expect(screen.getByText('等待平台审核')).toBeVisible();
   });
 
   it('removes a rejected existing image and uploads its replacement before resubmitting', async () => {
@@ -290,7 +290,7 @@ describe('create item page', () => {
         ],
       }),
     );
-    expect(screen.getByText('等待审核')).toBeVisible();
+    expect(screen.getByText('等待平台审核')).toBeVisible();
   });
 
   it.each([

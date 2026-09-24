@@ -6,6 +6,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -25,7 +26,7 @@ import { ItemsService } from './items.service.js';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('CUSTOMER')
 export class ItemsController {
-  constructor(private readonly itemsService: ItemsService) {}
+  constructor(@Inject(ItemsService) private readonly itemsService: ItemsService) {}
 
   @Post('items')
   create(

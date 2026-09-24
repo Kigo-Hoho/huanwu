@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   Post,
   UseGuards,
   UsePipes,
@@ -29,7 +30,7 @@ const adminLoginSchema = z.object({
 
 @Controller()
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post('auth/wechat')
   @UsePipes(new ZodValidationPipe(wechatLoginSchema))

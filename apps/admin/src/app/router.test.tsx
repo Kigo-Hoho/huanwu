@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -30,8 +30,12 @@ describe('operator router', () => {
     render(<AppRouter />);
 
     expect(await screen.findByRole('heading', { name: '运营审核登录' })).toBeVisible();
-    await user.type(screen.getByLabelText('邮箱'), 'reviewer@example.test');
-    await user.type(screen.getByLabelText('密码'), 'password');
+    fireEvent.change(screen.getByLabelText('邮箱'), {
+      target: { value: 'reviewer@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('密码'), {
+      target: { value: 'password' },
+    });
     await user.click(screen.getByRole('button', { name: '登录' }));
     expect(await screen.findByRole('heading', { name: '待审核物品' })).toBeVisible();
     expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/admin/password');

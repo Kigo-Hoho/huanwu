@@ -10,8 +10,14 @@ interface WechatCodeExchangeResponse {
   errmsg?: unknown;
 }
 
+export interface CustomerIdentityProvider {
+  exchangeCode(code: string): Promise<{ openid: string }>;
+}
+
+export const CUSTOMER_IDENTITY_PROVIDER = Symbol('CUSTOMER_IDENTITY_PROVIDER');
+
 @Injectable()
-export class WechatIdentityProvider {
+export class WechatIdentityProvider implements CustomerIdentityProvider {
   async exchangeCode(code: string): Promise<{ openid: string }> {
     const appId = process.env.WECHAT_APP_ID;
     const appSecret = process.env.WECHAT_APP_SECRET;

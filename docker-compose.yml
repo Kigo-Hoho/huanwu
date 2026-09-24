@@ -1,3 +1,5 @@
+name: barter
+
 services:
   postgres:
     container_name: barter-postgres
