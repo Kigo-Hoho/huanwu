@@ -73,6 +73,8 @@ Counter 使用完整方案字段加 `expectedVersion`。服务端对比现版：
 
 命令返回 ProposalView；其 `versions` 按 number 升序包含完整不可变版本，当前编号为 currentVersion。每版含 offeredItems、targetItem 和完整条款。列表可直接使用该视图，后续若增加摘要契约须同步共享类型。
 
+任务 3 已实现创建（201）、用户列表和参与者详情（200）。用户列表要求显式 `direction=sent|received`，按 `(createdAt DESC, id DESC)` 返回完整 ProposalView 数组。创建时物品不存在、归属不符、自投、非 ACTIVE 或存在未到期占用均返回 409 ITEM_UNAVAILABLE；过期占用与公开可投标识一致，不阻止新的待回复提案，也不会被创建操作删除或覆盖。协商命令、占用和自动期限处理由后续任务实现。
+
 400 VALIDATION_FAILED 表示不合法请求或缺失幂等键；401 AUTH_REQUIRED；403 FORBIDDEN 表示会话角色或参与权限不足，PROPOSAL_WRONG_TURN 表示非当前回应人，PROPOSAL_SIDE_FORBIDDEN 表示越侧修改；404 PROPOSAL_NOT_FOUND 隐藏非参与者提案。409 包括 PROPOSAL_VERSION_CONFLICT、PROPOSAL_INVALID_STATE、PROPOSAL_EXPIRED、ITEM_UNAVAILABLE、IDEMPOTENCY_CONFLICT。错误仍统一 ApiErrorBody，并带 requestId。
 
 ## 测试身份与分任务交付
