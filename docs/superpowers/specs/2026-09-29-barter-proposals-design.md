@@ -81,6 +81,12 @@ Counter 使用完整方案字段加 `expectedVersion`。服务端对比现版：
 
 400 VALIDATION_FAILED 表示不合法请求或缺失幂等键；401 AUTH_REQUIRED；403 FORBIDDEN 表示会话角色或参与权限不足，PROPOSAL_WRONG_TURN 表示非当前回应人，PROPOSAL_SIDE_FORBIDDEN 表示越侧修改；404 PROPOSAL_NOT_FOUND 隐藏非参与者提案。409 包括 PROPOSAL_VERSION_CONFLICT、PROPOSAL_INVALID_STATE、PROPOSAL_EXPIRED、ITEM_UNAVAILABLE、IDEMPOTENCY_CONFLICT。错误仍统一 ApiErrorBody，并带 requestId。
 
+## 任务 6 工作台交付
+
+Taro 公开详情提供“我要换”，进入 authenticated create 页面；从“我的物品”进入投物箱，切换发出/收到，打开方案与完整历史。金额输入明确使用整数分；共享 schema 校验数量、差价与配送，面交自动提交零运费。当前回应人可修改自己侧物品或条款，另一侧快照 IDs 原样提交；接受/拒绝/取消携带当前修订号。所有命令保留逻辑幂等键，网络/5xx 失败重试复用；确定性错误后重新产生键，403/409 刷新现版并退出编辑。页面提供显式刷新，不以客户端时间自行转换状态。
+
+运营导航提供提案列表/详情，768px 以下卡片、桌面表格，长标识换行，历史展示双方内容、图片和条款。独立只读控制器允许三种运营角色，普通用户 403、未登录 401；不注册任何运营写路由。运营查询不触发业务转换，显示持久化状态与 UTC 期限；系统定时任务及既有用户请求继续负责到期清理。
+
 ## 测试身份与分任务交付
 
 API 仅在显式 `WECHAT_IDENTITY_PROVIDER=acceptance` 且 `NODE_ENV=test` 时选择测试提供器。保留 `e2e-customer-code` → `local-seed-customer`，新增 `e2e-customer-two-code` → `local-seed-customer-two`；其他代码拒绝。首次登录沿用 AuthService 创建 CUSTOMER，不需要生产微信或运营账号。正式环境使用真实微信，不变更生产配置。前端双浏览器会话/测试选择入口在后续端到端任务实现。

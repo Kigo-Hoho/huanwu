@@ -84,6 +84,29 @@ describe('proposal creation and participant queries', () => {
   const command = (id: string, action: string, body: object, actor = 1, key: string = randomUUID()) =>
     request(app.getHttpServer()).post(`/api/proposals/${id}/${action}`).set('Authorization', `Bearer ${tokens[actor]}`).set('Idempotency-Key', key).send(body);
 
+  it('offers separate read-only operator queries for every operator role and denies customer access', async () => {
+    const proposal = (await create().expect(201)).body;
+    await request(app.getHttpServer()).get('/api/admin/proposals').expect(401);
+    await get('/api/admin/proposals').expect(403);
+    await get(`/api/admin/proposals/${proposal.id}`).expect(403);
+    const operator = await prisma.user.findFirstOrThrow({ where: { adminCredential: { email: `${prefix}@example.test` } } });
+    for (const role of ['OPERATIONS', 'REVIEWER', 'SUPER_ADMIN'] as const) {
+      await prisma.userRole.deleteMany({ where: { userId: operator.id } });
+      await prisma.userRole.create({ data: { userId: operator.id, role } });
+      const list = (await get('/api/admin/proposals', operatorToken).expect(200)).body;
+      expect(list.find((p: { id: string }) => p.id === proposal.id)).toEqual(proposal);
+      expect((await get(`/api/admin/proposals/${proposal.id}`, operatorToken).expect(200)).body).toEqual(proposal);
+      await get(`/api/admin/proposals/${randomUUID()}`, operatorToken).expect(404);
+      await create(input(), randomUUID(), operatorToken).expect(403);
+      for (const action of ['counter', 'accept', 'reject', 'cancel']) {
+        await request(app.getHttpServer()).post(`/api/proposals/${proposal.id}/${action}`).set('Authorization', `Bearer ${operatorToken}`).set('Idempotency-Key', randomUUID()).send(action === 'counter' ? { ...input(), expectedVersion: 1 } : { expectedVersion: 1 }).expect(403);
+        await request(app.getHttpServer()).post(`/api/admin/proposals/${proposal.id}/${action}`).set('Authorization', `Bearer ${operatorToken}`).send({ expectedVersion: 1 }).expect(404);
+      }
+    }
+    await prisma.userRole.deleteMany({ where: { userId: operator.id } });
+    await prisma.userRole.create({ data: { userId: operator.id, role: 'REVIEWER' } });
+  });
+
   it('negotiates complete immutable revisions with alternating turns and own-side changes', async () => {
     const original = (await create().expect(201)).body;
     const replacement = await prisma.item.create({ data: { ownerId: users[1]!, status: 'ACTIVE', title: '替换目标', description: '替换目标的完整描述', condition: 'GOOD', referenceValueFen: 1000, wantedText: '换物', images: { create: images.map((url, sortOrder) => ({ url, sortOrder })) } } });

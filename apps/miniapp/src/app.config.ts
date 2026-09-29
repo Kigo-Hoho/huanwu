@@ -5,6 +5,9 @@ export default defineAppConfig({
     'pages/items/detail/index',
     'pages/items/discover/index',
     'pages/items/public-detail/index',
+    'pages/proposals/create/index',
+    'pages/proposals/list/index',
+    'pages/proposals/detail/index',
   ],
   window: {
     navigationBarTitleText: '以物换物',
