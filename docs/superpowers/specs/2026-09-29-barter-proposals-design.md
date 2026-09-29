@@ -75,7 +75,9 @@ Counter 使用完整方案字段加 `expectedVersion`。服务端对比现版：
 
 任务 3 已实现创建（201）、用户列表和参与者详情（200）。用户列表要求显式 `direction=sent|received`，按 `(createdAt DESC, id DESC)` 返回完整 ProposalView 数组。创建时物品不存在、归属不符、自投、非 ACTIVE 或存在未到期占用均返回 409 ITEM_UNAVAILABLE；过期占用与公开可投标识一致，不阻止新的待回复提案，也不会被创建操作删除或覆盖。协商命令、占用和自动期限处理由后续任务实现。
 
-任务 4 已实现 counter、reject、cancel（成功 200）以及接受入口。所有命令先锁定并重读提案，核验参与身份后再查幂等记录；新命令校验并发修订号、状态、期限和回应轮次。counter 对另一侧有序物品 ID 做完整一致检查，并锁定、重新验证双方物品后创建独立完整快照；取消已确认方案时在同一审计事务内释放占用。接受入口暂返回 409 PROPOSAL_INVALID_STATE，说明原子占用尚未启用，绝不提前写入 CONFIRMED。已过期的新命令返回 409 PROPOSAL_EXPIRED；自动写入 EXPIRED、请求路径的到期清理与周期任务按任务 5 完成。成功命令的幂等重放仍返回原始成功响应。
+任务 4～5 已实现 counter、accept、reject、cancel（成功 200）。所有命令先锁定并重读提案，核验参与身份后再查幂等记录；新命令校验期限、并发修订号、状态和回应轮次。counter 对另一侧有序物品 ID 做完整一致检查，并锁定、重新验证双方物品后创建独立完整快照。accept 按物品 ID 排序加锁，重新核验最新方案的双方归属、ACTIVE 状态与占用，原子写入全部占用、CONFIRMED、PROPOSAL_CONFIRMED 审计和幂等响应。已确认取消原子释放全部占用。
+
+每 60 秒执行一次到期扫描，参与者详情/列表读取和过期写命令也使用同一个 expire 转换。写命令回滚后独立提交到期转换，再返回 409 PROPOSAL_EXPIRED，避免错误响应回滚清理；已 EXPIRED 的新命令同样返回该错误。扫描使用行锁重新验证期限，重复扫描不重复审计。接受遇到旧的过期占用时，先释放当前事务的锁，再对原提案完成审计到期清理后重新尝试接受，禁止直接覆盖旧占用并避免反向提案锁死锁。到期审计失败保留原状态和占用，后续扫描重试。公开可投标识按占用时间直接计算，不等待扫描。成功命令的幂等重放仍返回原始成功响应。
 
 400 VALIDATION_FAILED 表示不合法请求或缺失幂等键；401 AUTH_REQUIRED；403 FORBIDDEN 表示会话角色或参与权限不足，PROPOSAL_WRONG_TURN 表示非当前回应人，PROPOSAL_SIDE_FORBIDDEN 表示越侧修改；404 PROPOSAL_NOT_FOUND 隐藏非参与者提案。409 包括 PROPOSAL_VERSION_CONFLICT、PROPOSAL_INVALID_STATE、PROPOSAL_EXPIRED、ITEM_UNAVAILABLE、IDEMPOTENCY_CONFLICT。错误仍统一 ApiErrorBody，并带 requestId。
 

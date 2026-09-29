@@ -8,6 +8,8 @@ import { AppModule } from '../src/app.module.js';
 import { AuditService } from '../src/audit/audit.service.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { configureApp } from '../src/main.js';
+import { ProposalsService } from '../src/proposals/proposals.service.js';
+import { ProposalExpiryScheduler } from '../src/proposals/proposal-expiry.scheduler.js';
 
 const prefix = 'task-3-proposals';
 const images = ['https://example.test/2.jpg', 'https://example.test/1.jpg', 'https://example.test/3.jpg'];
@@ -38,6 +40,8 @@ describe('proposal creation and participant queries', () => {
       await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" DISABLE TRIGGER "ProposalVersion_immutable"');
       await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" DISABLE TRIGGER "ProposalVersionItem_immutable"');
       try {
+        const proposalIds = (await tx.proposal.findMany({ where: { initiatorId: { in: ids } }, select: { id: true } })).map(proposal => proposal.id);
+        await tx.auditLog.deleteMany({ where: { entityId: { in: proposalIds } } });
         await tx.itemReservation.deleteMany({ where: { proposal: { initiatorId: { in: ids } } } });
         await tx.proposalVersionItem.deleteMany({ where: { proposalVersion: { proposal: { initiatorId: { in: ids } } } } });
         await tx.proposalVersion.deleteMany({ where: { proposal: { initiatorId: { in: ids } } } });
@@ -175,13 +179,104 @@ describe('proposal creation and participant queries', () => {
       expect((await get(`/api/proposals/${original.id}`).expect(200)).body).toEqual(original);
       expect(await prisma.idempotencyRecord.count({ where: { key } })).toBe(0);
     }
-    await command(original.id, 'accept', { expectedVersion: 1 }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_INVALID_STATE'));
+    const acceptSpy = vi.spyOn(app.get(AuditService), 'record').mockRejectedValueOnce(new Error('accept audit failure'));
+    try { await command(original.id, 'accept', { expectedVersion: 1 }).expect(500); } finally { acceptSpy.mockRestore(); }
     expect((await get(`/api/proposals/${original.id}`).expect(200)).body).toEqual(original);
     expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(0);
     await prisma.proposal.update({ where: { id: original.id }, data: { expiresAt: new Date(Date.now() - 1) } });
     for (const action of ['counter', 'accept', 'reject', 'cancel']) {
       await command(original.id, action, action === 'counter' ? { ...input(), expectedVersion: 1 } : { expectedVersion: 1 }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_EXPIRED'));
     }
+  });
+
+  it('reserves all items for 72 hours, replays acceptance, and serializes competing proposals', async () => {
+    const first = (await create().expect(201)).body;
+    const second = (await create().expect(201)).body;
+    const keys = [randomUUID(), randomUUID()];
+    const results = await Promise.all([command(first.id, 'accept', { expectedVersion: 1 }, 1, keys[0]), command(second.id, 'accept', { expectedVersion: 1 }, 1, keys[1])]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect(results.find(r => r.status === 409)!.body.code).toBe('ITEM_UNAVAILABLE');
+    const winner = results.find(r => r.status === 200)!.body;
+    expect(winner.status).toBe('CONFIRMED');
+    expect(new Date(winner.reservationExpiresAt).getTime() - new Date(winner.confirmedAt).getTime()).toBe(72 * 3600000);
+    const reservations = await prisma.itemReservation.findMany({ where: { proposalId: winner.id } });
+    expect(reservations).toHaveLength(3);
+    expect(reservations.every(r => r.proposalVersionId === winner.versions[0].id)).toBe(true);
+    await get(`/api/items/${target}`).expect(200).expect(({ body }) => expect(body.availableForProposal).toBe(false));
+    await command(winner.id, 'cancel', { expectedVersion: 2 }, 0).expect(200);
+    expect(await prisma.itemReservation.count({ where: { proposalId: winner.id } })).toBe(0);
+    await create().expect(201);
+    expect((await command(winner.id, 'accept', { expectedVersion: 1 }, 1, keys[winner.id === first.id ? 0 : 1]).expect(200)).body).toEqual(winner);
+  });
+
+  it('rolls back all reservations when one item becomes inactive', async () => {
+    const original = (await create().expect(201)).body;
+    await prisma.item.update({ where: { id: target }, data: { status: 'DRAFT' } });
+    try { await command(original.id, 'accept', { expectedVersion: 1 }).expect(409).expect(({ body }) => expect(body.code).toBe('ITEM_UNAVAILABLE')); }
+    finally { await prisma.item.update({ where: { id: target }, data: { status: 'ACTIVE' } }); }
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(0);
+    expect((await get(`/api/proposals/${original.id}`).expect(200)).body.status).toBe('PENDING');
+  });
+
+  it('expires confirmed cancellation atomically and makes delayed expired leases available', async () => {
+    const original = (await create().expect(201)).body;
+    const confirmed = (await command(original.id, 'accept', { expectedVersion: 1 }).expect(200)).body;
+    const past = new Date(Date.now() - 1);
+    await prisma.proposal.update({ where: { id: original.id }, data: { reservationExpiresAt: past } });
+    await prisma.itemReservation.updateMany({ where: { proposalId: original.id }, data: { expiresAt: past } });
+    await get(`/api/items/${target}`).expect(200).expect(({ body }) => expect(body.availableForProposal).toBe(true));
+    const spy = vi.spyOn(app.get(AuditService), 'record').mockRejectedValueOnce(new Error('expiry audit failure'));
+    try { await command(original.id, 'cancel', { expectedVersion: confirmed.version }).expect(500); } finally { spy.mockRestore(); }
+    expect((await prisma.proposal.findUniqueOrThrow({ where: { id: original.id } })).status).toBe('CONFIRMED');
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(3);
+    await command(original.id, 'cancel', { expectedVersion: confirmed.version }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_EXPIRED'));
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(0);
+    expect((await prisma.auditLog.findFirstOrThrow({ where: { entityId: original.id, action: 'PROPOSAL_EXPIRED' } })).actorId).toBeNull();
+    const next = (await create().expect(201)).body;
+    await command(next.id, 'accept', { expectedVersion: 1 }).expect(200);
+  });
+
+  it('uses the shared expiration service for pending deadlines and repeated scheduler sweeps', async () => {
+    const original = (await create().expect(201)).body;
+    await prisma.proposal.update({ where: { id: original.id }, data: { expiresAt: new Date(Date.now() - 1) } });
+    await app.get(ProposalExpiryScheduler).tick();
+    await app.get(ProposalsService).expireDue();
+    expect((await get(`/api/proposals/${original.id}`).expect(200)).body).toMatchObject({ status: 'EXPIRED', version: 2 });
+    expect(await prisma.auditLog.count({ where: { entityId: original.id, action: 'PROPOSAL_EXPIRED' } })).toBe(1);
+  });
+
+  it('reclaims a complete expired lease before accepting a competing proposal', async () => {
+    const old = (await create().expect(201)).body;
+    const next = (await create().expect(201)).body;
+    await command(old.id, 'accept', { expectedVersion: 1 }).expect(200);
+    const past = new Date(Date.now() - 1);
+    await prisma.proposal.update({ where: { id: old.id }, data: { reservationExpiresAt: past } });
+    await prisma.itemReservation.updateMany({ where: { proposalId: old.id }, data: { expiresAt: past } });
+    await command(next.id, 'accept', { expectedVersion: 1 }).expect(200);
+    expect(await prisma.itemReservation.count({ where: { proposalId: old.id } })).toBe(0);
+    expect(await prisma.itemReservation.count({ where: { proposalId: next.id } })).toBe(3);
+    expect((await prisma.proposal.findUniqueOrThrow({ where: { id: old.id } })).status).toBe('EXPIRED');
+    expect(await prisma.auditLog.count({ where: { entityId: old.id, action: 'PROPOSAL_EXPIRED' } })).toBe(1);
+  });
+
+  it('serializes identical acceptance retries and reserves maximum six-item offers', async () => {
+    const extra: string[] = [];
+    for (let i = 0; i < 3; i++) extra.push((await prisma.item.create({ data: { ownerId: users[0]!, status: 'ACTIVE', title: '追加物品', description: '这是完整物品描述和使用情况', condition: 'GOOD', referenceValueFen: 1000, wantedText: '换物', images: { create: images.map((url, sortOrder) => ({ url, sortOrder })) } } })).id);
+    const original = (await create({ ...input(), offeredItemIds: [...offered, ...extra] }).expect(201)).body;
+    const key = randomUUID();
+    const results = await Promise.all([command(original.id, 'accept', { expectedVersion: 1 }, 1, key), command(original.id, 'accept', { expectedVersion: 1 }, 1, key)]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect(results[0]!.body).toEqual(results[1]!.body);
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(6);
+    expect(await prisma.auditLog.count({ where: { entityId: original.id, action: 'PROPOSAL_CONFIRMED' } })).toBe(1);
+  });
+
+  it('expires overdue pending proposals on participant reads', async () => {
+    const original = (await create().expect(201)).body;
+    await prisma.proposal.update({ where: { id: original.id }, data: { expiresAt: new Date(Date.now() - 1) } });
+    await get(`/api/proposals/${original.id}`, tokens[2]).expect(404);
+    expect((await prisma.proposal.findUniqueOrThrow({ where: { id: original.id } })).status).toBe('PENDING');
+    await get(`/api/proposals/${original.id}`).expect(200).expect(({ body }) => expect(body.status).toBe('EXPIRED'));
   });
 
   it('creates a complete immutable version, recipient turn, seven-day expiry and one audit', async () => {
