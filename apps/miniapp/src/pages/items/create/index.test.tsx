@@ -47,6 +47,13 @@ function createDependencies() {
 }
 
 describe('create item page', () => {
+  it('offers a find-swap entry from the starting page', () => {
+    const navigateToDiscover = vi.fn();
+    render(<CreateItemPage dependencies={createDependencies()} navigateToDiscover={navigateToDiscover} />);
+    expect(screen.queryByRole('button', { name: '找换' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '找换' }));
+    expect(navigateToDiscover).toHaveBeenCalledOnce();
+  });
   it('blocks submission until three images and required fields are present', async () => {
     render(<CreateItemPage dependencies={createDependencies()} />);
     fireEvent.input(screen.getByLabelText('物品名称'), {

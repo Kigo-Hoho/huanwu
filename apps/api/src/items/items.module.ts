@@ -6,11 +6,13 @@ import { AdminItemsController } from './admin-items.controller.js';
 import { ItemReviewService } from './item-review.service.js';
 import { ItemsController } from './items.controller.js';
 import { ItemsService } from './items.service.js';
+import { PublicItemsController } from './public-items.controller.js';
+import { PublicItemsService } from './public-items.service.js';
 
 @Module({
   imports: [AuthModule, AuditModule],
-  controllers: [ItemsController, AdminItemsController],
-  providers: [ItemsService, ItemReviewService],
+  controllers: [ItemsController, AdminItemsController, PublicItemsController],
+  providers: [ItemsService, ItemReviewService, PublicItemsService],
   exports: [ItemsService],
 })
 export class ItemsModule {}

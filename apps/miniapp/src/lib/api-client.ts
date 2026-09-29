@@ -1,6 +1,8 @@
 import {
   CreateItemSchema,
   type ItemView,
+  type PublicItemList,
+  type PublicItemView,
   type Role,
 } from '@barter/contracts';
 import Taro from '@tarojs/taro';
@@ -118,6 +120,15 @@ export class AuthenticatedApiClient {
       {},
       true,
     );
+  }
+
+  listPublicItems(cursor?: string): Promise<PublicItemList> {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    return this.send<PublicItemList>({ url: `/api/items${query}`, method: 'GET' });
+  }
+
+  getPublicItem(itemId: string): Promise<PublicItemView> {
+    return this.send<PublicItemView>({ url: `/api/items/${encodeURIComponent(itemId)}`, method: 'GET' });
   }
 
   private async authorized<T>(

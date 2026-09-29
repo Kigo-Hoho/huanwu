@@ -64,6 +64,7 @@ export function MyItemsPage({
 
   return (
     <View>
+      <Button {...buttonRole} onClick={() => navigateToDetail('/pages/items/discover/index')}>找换</Button>
       {error ? <Text {...alertRole}>{error}</Text> : null}
       {sections.map((section) => (
         <View key={section.status}>
