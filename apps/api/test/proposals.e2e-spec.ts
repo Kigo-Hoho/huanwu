@@ -3,7 +3,7 @@ import { ProposalViewSchema } from '@barter/contracts';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { AuditService } from '../src/audit/audit.service.js';
 import { PrismaService } from '../src/database/prisma.service.js';
@@ -75,6 +75,114 @@ describe('proposal creation and participant queries', () => {
     hidden = await makeItem(users[0]!, 'DRAFT');
   });
   afterAll(async () => { if (prisma) await cleanup(); if (app) await app.close(); });
+  afterEach(async () => { await prisma.itemReservation.deleteMany({ where: { proposal: { initiatorId: users[0] } } }); });
+
+  const command = (id: string, action: string, body: object, actor = 1, key: string = randomUUID()) =>
+    request(app.getHttpServer()).post(`/api/proposals/${id}/${action}`).set('Authorization', `Bearer ${tokens[actor]}`).set('Idempotency-Key', key).send(body);
+
+  it('negotiates complete immutable revisions with alternating turns and own-side changes', async () => {
+    const original = (await create().expect(201)).body;
+    const replacement = await prisma.item.create({ data: { ownerId: users[1]!, status: 'ACTIVE', title: '替换目标', description: '替换目标的完整描述', condition: 'GOOD', referenceValueFen: 1000, wantedText: '换物', images: { create: images.map((url, sortOrder) => ({ url, sortOrder })) } } });
+    const before = Date.now();
+    const second = (await command(original.id, 'counter', { ...input(), targetItemId: replacement.id, differenceFen: 200, expectedVersion: 1 }).expect(200)).body;
+    expect(second).toMatchObject({ version: 2, currentVersion: 2, responderId: users[0], status: 'PENDING' });
+    expect(second.versions[0]).toEqual(original.versions[0]);
+    expect(second.versions[1]).toMatchObject({ number: 2, authorId: users[1], differenceFen: 200, targetItem: { itemId: replacement.id, imageUrls: images } });
+    expect(second.versions[1].offeredItems).toEqual(original.versions[0].offeredItems);
+    expect(new Date(second.expiresAt).getTime()).toBeGreaterThanOrEqual(before + 7 * 86400000);
+    const third = (await command(original.id, 'counter', { ...input(), offeredItemIds: [offered[1]], targetItemId: replacement.id, expectedVersion: 2 }, 0).expect(200)).body;
+    expect(third).toMatchObject({ version: 3, currentVersion: 3, responderId: users[1] });
+    expect(third.versions.slice(0, 2)).toEqual(second.versions);
+    expect(third.versions[2].offeredItems).toHaveLength(1);
+    expect(ProposalViewSchema.safeParse(third).success).toBe(true);
+    expect(await prisma.auditLog.count({ where: { entityId: original.id, action: 'PROPOSAL_COUNTERED' } })).toBe(2);
+  });
+
+  it('enforces turn, side, participant, role and version boundaries on commands', async () => {
+    const { id } = (await create().expect(201)).body;
+    const counter = { ...input(), expectedVersion: 1 };
+    for (const action of ['counter', 'accept', 'reject']) {
+      await command(id, action, action === 'counter' ? counter : { expectedVersion: 1 }, 0).expect(403).expect(({ body }) => expect(body.code).toBe('PROPOSAL_WRONG_TURN'));
+    }
+    await command(id, 'counter', { ...counter, offeredItemIds: [offered[0]] }).expect(403).expect(({ body }) => expect(body.code).toBe('PROPOSAL_SIDE_FORBIDDEN'));
+    await command(id, 'counter', { ...counter, targetItemId: hidden }).expect(409).expect(({ body }) => expect(body.code).toBe('ITEM_UNAVAILABLE'));
+    for (const action of ['counter', 'accept', 'reject', 'cancel']) {
+      const body = action === 'counter' ? counter : { expectedVersion: 1 };
+      await command(id, action, body, 2).expect(404);
+      await request(app.getHttpServer()).post(`/api/proposals/${id}/${action}`).set('Authorization', `Bearer ${operatorToken}`).set('Idempotency-Key', randomUUID()).send(body).expect(403);
+      await command(id, action, { ...body, expectedVersion: 9 }).expect(409).expect(({ body: error }) => expect(error.code).toBe('PROPOSAL_VERSION_CONFLICT'));
+      await command(id, action, { ...body, unexpected: true }).expect(400);
+      await command(id, action, body, 1, ' ').expect(400);
+    }
+    await command(id, 'counter', counter).expect(200);
+    await command(id, 'counter', { ...counter, expectedVersion: 2, targetItemId: randomUUID() }, 0).expect(403).expect(({ body }) => expect(body.code).toBe('PROPOSAL_SIDE_FORBIDDEN'));
+  });
+
+  it('serializes concurrent counters, including both participants, and replays original results', async () => {
+    const { id } = (await create().expect(201)).body;
+    const body = { ...input(), expectedVersion: 1 };
+    const key = randomUUID();
+    const same = await Promise.all([command(id, 'counter', body, 1, key), command(id, 'counter', body, 1, key)]);
+    expect(same.map(r => r.status)).toEqual([200, 200]);
+    expect(same[0]!.body).toEqual(same[1]!.body);
+    await command(id, 'counter', { ...body, differenceFen: 101 }, 1, key).expect(409).expect(({ body: error }) => expect(error.code).toBe('IDEMPOTENCY_CONFLICT'));
+    const other = (await create().expect(201)).body;
+    await command(other.id, 'counter', body, 1, key).expect(409).expect(({ body: error }) => expect(error.code).toBe('IDEMPOTENCY_CONFLICT'));
+    const concurrent = await Promise.all([command(id, 'counter', { ...body, expectedVersion: 2 }, 0), command(id, 'counter', { ...body, expectedVersion: 2 }, 1)]);
+    expect(concurrent.filter(r => r.status === 200)).toHaveLength(1);
+    expect([403, 409]).toContain(concurrent.find(r => r.status !== 200)!.status);
+    expect((await command(id, 'counter', body, 1, key).expect(200)).body).toEqual(same[0]!.body);
+    expect(await prisma.proposalVersion.count({ where: { proposalId: id } })).toBe(3);
+    expect(await prisma.auditLog.count({ where: { entityId: id, action: 'PROPOSAL_COUNTERED' } })).toBe(2);
+    const race = (await create().expect(201)).body;
+    const competing = await Promise.all([command(race.id, 'counter', body), command(race.id, 'counter', { ...body, differenceFen: 101 })]);
+    expect(competing.map(r => r.status).sort()).toEqual([200, 409]);
+  });
+
+  it('rejects or cancels once, allows either participant cancellation, and blocks terminated commands', async () => {
+    for (const [action, actor, status] of [['reject', 1, 'REJECTED'], ['cancel', 0, 'CANCELLED'], ['cancel', 1, 'CANCELLED']] as const) {
+      const original = (await create().expect(201)).body;
+      const key = randomUUID();
+      const result = (await command(original.id, action, { expectedVersion: 1 }, actor, key).expect(200)).body;
+      expect(result).toMatchObject({ status, version: 2, currentVersion: 1, versions: original.versions });
+      expect((await command(original.id, action, { expectedVersion: 1 }, actor, key).expect(200)).body).toEqual(result);
+      await command(original.id, action, { expectedVersion: 2 }, actor, key).expect(409).expect(({ body }) => expect(body.code).toBe('IDEMPOTENCY_CONFLICT'));
+      for (const next of ['accept', 'reject', 'cancel', 'counter']) {
+        await command(original.id, next, next === 'counter' ? { ...input(), expectedVersion: 2 } : { expectedVersion: 2 }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_INVALID_STATE'));
+      }
+      expect(await prisma.auditLog.count({ where: { entityId: original.id } })).toBe(2);
+    }
+  });
+
+  it('cancels confirmed proposals and releases reservations in the audit transaction', async () => {
+    const original = (await create().expect(201)).body;
+    await prisma.proposal.update({ where: { id: original.id }, data: { status: 'CONFIRMED', confirmedAt: new Date(), reservationExpiresAt: new Date(Date.now() + 60000) } });
+    await prisma.itemReservation.create({ data: { itemId: target, proposalId: original.id, proposalVersionId: original.versions[0].id, expiresAt: new Date(Date.now() + 60000) } });
+    const spy = vi.spyOn(app.get(AuditService), 'record').mockRejectedValueOnce(new Error('cancel audit failure'));
+    try { await command(original.id, 'cancel', { expectedVersion: 1 }).expect(500); } finally { spy.mockRestore(); }
+    expect((await prisma.proposal.findUniqueOrThrow({ where: { id: original.id } })).status).toBe('CONFIRMED');
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(1);
+    await command(original.id, 'cancel', { expectedVersion: 1 }).expect(200);
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(0);
+  });
+
+  it('rolls back counter and rejection on audit failure and never confirms without reservations', async () => {
+    const original = (await create().expect(201)).body;
+    for (const action of ['counter', 'reject']) {
+      const key = randomUUID();
+      const spy = vi.spyOn(app.get(AuditService), 'record').mockRejectedValueOnce(new Error('negotiation audit failure'));
+      try { await command(original.id, action, action === 'counter' ? { ...input(), expectedVersion: 1 } : { expectedVersion: 1 }, 1, key).expect(500); } finally { spy.mockRestore(); }
+      expect((await get(`/api/proposals/${original.id}`).expect(200)).body).toEqual(original);
+      expect(await prisma.idempotencyRecord.count({ where: { key } })).toBe(0);
+    }
+    await command(original.id, 'accept', { expectedVersion: 1 }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_INVALID_STATE'));
+    expect((await get(`/api/proposals/${original.id}`).expect(200)).body).toEqual(original);
+    expect(await prisma.itemReservation.count({ where: { proposalId: original.id } })).toBe(0);
+    await prisma.proposal.update({ where: { id: original.id }, data: { expiresAt: new Date(Date.now() - 1) } });
+    for (const action of ['counter', 'accept', 'reject', 'cancel']) {
+      await command(original.id, action, action === 'counter' ? { ...input(), expectedVersion: 1 } : { expectedVersion: 1 }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_EXPIRED'));
+    }
+  });
 
   it('creates a complete immutable version, recipient turn, seven-day expiry and one audit', async () => {
     const before = Date.now();
