@@ -10,8 +10,11 @@ async function loginCustomer(page: Page, code: string) {
   await page.addInitScript((identityCode) => {
     Object.assign(globalThis, { __BARTER_ACCEPTANCE_IDENTITY_CODE__: identityCode });
   }, code);
+  await page.goto(`${miniapp}/pages/items/create/index`);
+  const myItems = page.getByRole('button', { name: '我的物品', exact: true });
+  await expect(myItems).toBeVisible();
   const login = page.waitForResponse(response => response.url() === `${api}/auth/wechat` && response.request().method() === 'POST', { timeout: 10_000 });
-  await page.goto(`${miniapp}/pages/items/mine/index`);
+  await myItems.click();
   const response = await login;
   expect(response.status()).toBe(201);
   const session = await response.json();
@@ -112,6 +115,8 @@ test('two customers discover, counter with a replacement, reserve every item and
     await recipient.getByLabel('差价（分）', { exact: true }).locator('input').fill('1200');
     await recipient.getByRole('button', { name: '接收方补差', exact: true }).click();
     await recipient.getByRole('button', { name: '选择快递', exact: true }).click();
+    await expect(recipient.getByText('发起方运费（分）', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(recipient.getByText('接收方运费（分）', { exact: true }).filter({ visible: true })).toBeVisible();
     await recipient.getByLabel('发起方运费（分）', { exact: true }).locator('input').fill('600');
     await recipient.getByLabel('接收方运费（分）', { exact: true }).locator('input').fill('800');
     const countered = await submitCommand(recipient, '提交方案', `/proposals/${created.id}/counter`);

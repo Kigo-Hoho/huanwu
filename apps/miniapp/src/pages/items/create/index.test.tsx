@@ -47,6 +47,14 @@ function createDependencies() {
 }
 
 describe('create item page', () => {
+  it('opens my items from the normal starting page', () => {
+    const navigateToMyItems = vi.fn();
+    render(<CreateItemPage dependencies={createDependencies()} navigateToMyItems={navigateToMyItems} />);
+    const entry = screen.queryByRole('button', { name: '我的物品' });
+    expect(entry).not.toBeNull();
+    fireEvent.click(entry!);
+    expect(navigateToMyItems).toHaveBeenCalledOnce();
+  });
   it('offers a find-swap entry from the starting page', () => {
     const navigateToDiscover = vi.fn();
     render(<CreateItemPage dependencies={createDependencies()} navigateToDiscover={navigateToDiscover} />);

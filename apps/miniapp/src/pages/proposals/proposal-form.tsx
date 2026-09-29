@@ -39,7 +39,9 @@ export function ProposalForm({ items, targetItemId, initial, side = 'INITIATOR',
     <Button {...buttonRole} disabled={busy} onClick={() => setDelivery('COURIER')}>选择快递</Button>
     {delivery === 'COURIER' && <View>
       <Text>双方各自承担的运费估计（分）</Text>
+      <Text>发起方运费（分）</Text>
       <Input {...inputLabel('发起方运费（分）')} type='number' disabled={busy} value={shippingA} onInput={event => setShippingA(event.detail.value)} />
+      <Text>接收方运费（分）</Text>
       <Input {...inputLabel('接收方运费（分）')} type='number' disabled={busy} value={shippingB} onInput={event => setShippingB(event.detail.value)} />
     </View>}
     <Button {...buttonRole} {...buttonDisabled(busy || !parsed.success)} disabled={busy || !parsed.success} onClick={() => { if (!busy && parsed.success) void onSubmit(parsed.data); }}>提交方案</Button>

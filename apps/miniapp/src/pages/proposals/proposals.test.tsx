@@ -11,6 +11,14 @@ const snapshot = { ...item, itemId: item.id, itemVersion: 1 };
 const proposal: ProposalView = { id: id(5), initiatorId: id(10), recipientId: id(11), responderId: id(11), status: 'PENDING', version: 3, currentVersion: 1, expiresAt: '2026-10-06T00:00:00.000Z', confirmedAt: null, reservationExpiresAt: null, createdAt: item.createdAt, updatedAt: item.updatedAt, versions: [{ id: id(6), number: 1, authorId: id(10), createdAt: item.createdAt, offeredItems: [snapshot], targetItem: { ...snapshot, itemId: id(2), ownerId: id(11), title: '对方背包' }, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 }] };
 
 describe('proposal workbench', () => {
+  it('shows who pays each courier estimate as visible text', () => {
+    render(<ProposalForm items={[item]} targetItemId={id(2)} onSubmit={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '选择快递' }));
+    expect(screen.getByText('发起方运费（分）')).toBeVisible();
+    expect(screen.getByText('接收方运费（分）')).toBeVisible();
+    expect(screen.getByLabelText('发起方运费（分）')).toBeVisible();
+    expect(screen.getByLabelText('接收方运费（分）')).toBeVisible();
+  });
   it('ignores a delayed refresh captured before a successful rejection', async () => {
     let resolveRefresh!: (value: ProposalView) => void;
     const delayedRefresh = new Promise<ProposalView>(resolve => { resolveRefresh = resolve; });
