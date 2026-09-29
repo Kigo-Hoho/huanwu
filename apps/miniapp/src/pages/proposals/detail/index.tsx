@@ -24,18 +24,23 @@ export function ProposalDetailPage({ api = defaultApiClient, proposalId = Taro.g
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const locked = useRef(false);
+  const readGeneration = useRef(0);
   const attempt = useRef<{ body: string; key: string } | null>(null);
   useEffect(() => {
+    if (locked.current) return;
     let active = true;
+    const generation = ++readGeneration.current;
     void (async () => {
       await api.authenticate(defaultIdentityProvider);
       const [me, detail, owned] = await Promise.all([api.getMe(), api.getProposal(proposalId), api.listMyItems()]);
-      if (active) { setActor(me.id); setProposal(detail); setItems(owned); }
-    })().catch(cause => { if (active) setError(errorText(cause)); });
+      if (active && generation === readGeneration.current) { setActor(me.id); setProposal(detail); setItems(owned); }
+    })().catch(cause => { if (active && generation === readGeneration.current) setError(errorText(cause)); });
     return () => { active = false; };
   }, [api, proposalId, refresh]);
   const run = async (action: 'counter' | 'accept' | 'reject' | 'cancel', offer?: CreateProposalInput) => {
     if (!proposal || locked.current) return;
+    // A read started before this command must never overwrite its result or error.
+    readGeneration.current += 1;
     locked.current = true; setBusy(true); setError('');
     const input = { ...offer, expectedVersion: proposal.version };
     const body = JSON.stringify({ id: proposal.id, action, input });
@@ -60,7 +65,7 @@ export function ProposalDetailPage({ api = defaultApiClient, proposalId = Taro.g
   const initial = current && { offeredItemIds: current.offeredItems.map(item => item.itemId), targetItemId: current.targetItem.itemId, differenceFen: current.differenceFen, payer: current.payer, deliveryMode: current.deliveryMode, initiatorShippingFen: current.initiatorShippingFen, recipientShippingFen: current.recipientShippingFen };
   return <View>
     <Text>交换方案</Text>
-    <Button {...buttonRole} disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新方案</Button>
+    <Button {...buttonRole} disabled={busy} onClick={() => { if (!locked.current) setRefresh(value => value + 1); }}>刷新方案</Button>
     {error && <Text {...alertRole}>{error}</Text>}
     {!proposal ? <Text>加载方案中</Text> : <View>
       <ProposalHistory proposal={proposal} />

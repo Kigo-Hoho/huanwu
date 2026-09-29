@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ItemView, ProposalView } from '@barter/contracts';
 import { ProposalForm } from './proposal-form';
@@ -11,6 +11,22 @@ const snapshot = { ...item, itemId: item.id, itemVersion: 1 };
 const proposal: ProposalView = { id: id(5), initiatorId: id(10), recipientId: id(11), responderId: id(11), status: 'PENDING', version: 3, currentVersion: 1, expiresAt: '2026-10-06T00:00:00.000Z', confirmedAt: null, reservationExpiresAt: null, createdAt: item.createdAt, updatedAt: item.updatedAt, versions: [{ id: id(6), number: 1, authorId: id(10), createdAt: item.createdAt, offeredItems: [snapshot], targetItem: { ...snapshot, itemId: id(2), ownerId: id(11), title: '对方背包' }, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 }] };
 
 describe('proposal workbench', () => {
+  it('ignores a delayed refresh captured before a successful rejection', async () => {
+    let resolveRefresh!: (value: ProposalView) => void;
+    const delayedRefresh = new Promise<ProposalView>(resolve => { resolveRefresh = resolve; });
+    const rejected: ProposalView = { ...proposal, status: 'REJECTED', version: 4 };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11) }), getProposal: vi.fn().mockResolvedValueOnce(proposal).mockReturnValueOnce(delayedRefresh), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn().mockResolvedValue(rejected) };
+    render(<ProposalDetailPage api={api} proposalId={proposal.id} />);
+    await screen.findByRole('button', { name: '拒绝方案' });
+    fireEvent.click(screen.getByRole('button', { name: '刷新方案' }));
+    await waitFor(() => expect(api.getProposal).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: '拒绝方案' }));
+    expect(await screen.findByText('已拒绝')).toBeVisible();
+    await act(async () => { resolveRefresh(proposal); await delayedRefresh; });
+    expect(screen.getByText('已拒绝')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /接受方案|拒绝方案|取消提案|修改方案/ })).not.toBeInTheDocument();
+  });
+
   it('keeps initiator items fixed when recipient changes target and shipping terms', async () => {
     const submit = vi.fn();
     const current = proposal.versions[0]!;
