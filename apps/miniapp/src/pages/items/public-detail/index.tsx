@@ -33,7 +33,7 @@ export function PublicItemDetailPage({
     <Text>成色：{item.condition}</Text>
     <Text>想换：{item.wantedText}</Text>
     <Text>{item.availableForProposal ? '可投物' : '暂不可投'}</Text>
-    <Button {...({ role: 'button' } as unknown as ComponentProps<typeof Button>)} disabled={!item.availableForProposal} onClick={() => { void Taro.navigateTo({ url: `/pages/proposals/create/index?targetId=${encodeURIComponent(item.id)}` }); }}>我要换</Button>
+    <Button {...({ role: 'button', 'aria-disabled': !item.availableForProposal } as unknown as ComponentProps<typeof Button>)} disabled={!item.availableForProposal} onClick={() => { void Taro.navigateTo({ url: `/pages/proposals/create/index?targetId=${encodeURIComponent(item.id)}` }); }}>我要换</Button>
     {item.imageUrls.map((url, index) => <Image key={url} {...({ alt: `${item.title} 图片 ${index + 1}` } as unknown as ComponentProps<typeof Image>)} src={url} mode='aspectFill' />)}
   </View>;
 }

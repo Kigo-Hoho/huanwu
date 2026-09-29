@@ -71,7 +71,10 @@ describe('public item discovery', () => {
   afterAll(async () => { if (prisma) await cleanup(); if (app) await app.close(); });
 
   it('lists only active items with explicit safe fields and availability based on live reservations', async () => {
-    const { body } = await request(app.getHttpServer()).get('/api/items').expect(200);
+    // Browser runs leave newer reviewed items in the same dedicated test database.
+    // Start at this fixture's time window instead of assuming it is in the newest 20 rows.
+    const start = Buffer.from(JSON.stringify({ createdAt: '2026-09-21T00:00:00.000Z', id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' })).toString('base64url');
+    const { body } = await request(app.getHttpServer()).get('/api/items').query({ cursor: start }).expect(200);
     const ownItems = body.items.filter((item: { ownerId: string }) => item.ownerId === ownerId);
     expect(ownItems).toHaveLength(3);
     expect(ownItems.map((item: { availableForProposal: boolean }) => item.availableForProposal)).toEqual([false, true, true]);

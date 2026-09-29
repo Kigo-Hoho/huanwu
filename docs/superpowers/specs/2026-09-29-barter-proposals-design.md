@@ -89,7 +89,9 @@ Taro 公开详情提供“我要换”，进入 authenticated create 页面；�
 
 ## 测试身份与分任务交付
 
-API 仅在显式 `WECHAT_IDENTITY_PROVIDER=acceptance` 且 `NODE_ENV=test` 时选择测试提供器。保留 `e2e-customer-code` → `local-seed-customer`，新增 `e2e-customer-two-code` → `local-seed-customer-two`；其他代码拒绝。首次登录沿用 AuthService 创建 CUSTOMER，不需要生产微信或运营账号。正式环境使用真实微信，不变更生产配置。前端双浏览器会话/测试选择入口在后续端到端任务实现。
+API 仅在显式 `WECHAT_IDENTITY_PROVIDER=acceptance` 且 `NODE_ENV=test` 时选择测试提供器。保留 `e2e-customer-code` → `local-seed-customer`，新增 `e2e-customer-two-code` → `local-seed-customer-two`；其他代码拒绝。首次登录沿用 AuthService 创建 CUSTOMER，不需要生产微信或运营账号。正式环境使用真实微信，不变更生产配置。H5 验收构建通过页面加载前显式注入 `globalThis.__BARTER_ACCEPTANCE_IDENTITY_CODE__` 选择其中一人，未注入保持第一阶段客户；只由 acceptance provider 读取，真实 Taro provider 忽略，绝不作为生产回退。Playwright 使用两个隔离 BrowserContext 自行登录和存储会话，另用匿名会话核验公开可投标识。
+
+任务 7 浏览器验收经真实 API 上传、发布和审核准备 ACTIVE 物品，在页面完成多物选择、接收方替换目标及条款、发起方接受和接收方取消；核验每件当前物品占用及释放、原目标未被占用、历史报价完整保留。CI 继续运行第一阶段验收及运营只读验收，并执行六项质量门。第三阶段订单交接必须与占用、幂等和审计同事务，与取消和到期串行裁决，不允许先释放再创建订单；具体检查和待定义的转换后状态见 README 的 Phase 3 交接要求。
 
 任务 1 仅交付契约、数据模型、迁移和测试身份，不注册提案接口。任务 2～7 分别交付发现、创建/查询、协商、原子占用、工作台和两用户验收。任务 4 的接受操作在任务 5 完成原子占用前不能对外成功返回 CONFIRMED。
 

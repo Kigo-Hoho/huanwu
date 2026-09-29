@@ -136,6 +136,31 @@ describe('customer adapters', () => {
     ).toThrow(/unknown identity provider/i);
   });
 
+  it('selects either explicitly injected acceptance customer and rejects unknown codes', async () => {
+    const provider = createIdentityCodeProvider({ provider: 'acceptance', target: 'h5', buildEnvironment: 'acceptance' });
+    try {
+      for (const code of ['e2e-customer-code', 'e2e-customer-two-code']) {
+        vi.stubGlobal('__BARTER_ACCEPTANCE_IDENTITY_CODE__', code);
+        await expect(provider.getCode()).resolves.toBe(code);
+      }
+      vi.stubGlobal('__BARTER_ACCEPTANCE_IDENTITY_CODE__', 'unknown-customer');
+      await expect(provider.getCode()).rejects.toMatchObject({ message: 'Invalid acceptance identity code.' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('ignores acceptance injection for the production Taro provider without falling back on login failure', async () => {
+    vi.stubGlobal('__BARTER_ACCEPTANCE_IDENTITY_CODE__', 'e2e-customer-two-code');
+    try {
+      const configuration = { provider: 'taro', target: 'h5', buildEnvironment: 'production' };
+      await expect(createIdentityCodeProvider(configuration, async () => ({ code: 'real-code' })).getCode()).resolves.toBe('real-code');
+      await expect(createIdentityCodeProvider(configuration, async () => { throw new Error('WeChat unavailable'); }).getCode()).rejects.toMatchObject({ message: 'WeChat unavailable' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('authenticates once, persists the token, and sends an idempotent authorized submission', async () => {
     const session = new Session(new MemoryStorage());
     const request = vi

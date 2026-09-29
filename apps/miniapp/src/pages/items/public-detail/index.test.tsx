@@ -17,5 +17,6 @@ describe('public item detail', () => {
     expect(await screen.findByText('九成新双肩包')).toBeVisible();
     expect(screen.getByText('拉链和内衬完好')).toBeVisible();
     expect(screen.getByText('暂不可投')).toBeVisible();
+    expect(screen.getByRole('button', { name: '我要换' })).toHaveAttribute('aria-disabled', 'true');
   });
 });

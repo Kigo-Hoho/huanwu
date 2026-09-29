@@ -1,6 +1,6 @@
 # 以物换物 · 发布审核与投物协商
 
-这个 npm workspaces 仓库实现了第一个可运行竖向切片：客户在 Taro 小程序中发布物品，审核员在响应式 React 工作台中审核，NestJS API 通过 PostgreSQL 持久化并记录审计日志。
+这个 npm workspaces 仓库实现发布审核和双用户投物协商：客户在 Taro 小程序发布物品、发现物品、协商交换，运营在响应式 React 工作台审核与只读查询提案，NestJS API 通过 PostgreSQL 持久化并记录审计日志。
 
 ## 环境要求
 
@@ -92,4 +92,30 @@ Phase 1 是已完成的发布审核基线；Phase 2 在此基础上新增找换�
 
 运营网页导航“交换提案”提供 `/proposals` 列表及详情，电脑表格、手机卡片展示。OPERATIONS、REVIEWER、SUPER_ADMIN 都可通过独立 `GET /api/admin/proposals` 与 `GET /api/admin/proposals/:id` 查询完整历史，不能代用户修改、接受、拒绝或取消。读接口只读取持久化状态，期限清理由既有系统任务/用户请求处理。
 
-测试 API 支持 `e2e-customer-code` 和 `e2e-customer-two-code` 两个独立身份（仅 `NODE_ENV=test` 且显式 acceptance provider）。两用户完整浏览器协商流程及 CI 收尾属于 Phase 2 Task 7；`e2e/admin-proposals.spec.ts` 使用真实 API 验证运营手机宽度与只读页面。
+测试 API 支持以下两个独立身份（仅 `NODE_ENV=test` 且显式 acceptance provider）；第二个客户在首次登录时由正常 AuthService 创建，无需给客户分配运营凭据。
+
+| 浏览器身份码 | 测试微信标识 |
+| --- | --- |
+| `e2e-customer-code` | `local-seed-customer` |
+| `e2e-customer-two-code` | `local-seed-customer-two` |
+
+`e2e/two-customer-proposals.spec.ts` 创建两个隔离 BrowserContext，在页面加载前通过 `addInitScript` 设置 `globalThis.__BARTER_ACCEPTANCE_IDENTITY_CODE__`，由 H5 自己交换身份码并保存会话，不注入 bearer token。该变量只由显式 acceptance provider 读取；未注入时保留第一阶段的第一个客户，未知代码拒绝。真实 Taro provider 忽略此变量，微信失败不回退到测试账号。测试构建不得部署为生产应用。
+
+浏览器验收先通过真实上传、创建、提交和审核 API 准备双方 ACTIVE 物品，然后在用户页面完成公开找换 → 发起方选择多件自己的物品 → 接收方替换自己的目标、修改差价与快递运费 → 发起方接受 → 匿名浏览确认全部当前物品不可投 → 接收方取消 → 全部恢复可投。保留旧目标可投及完整历史断言。第一阶段发布审核浏览器测试和 `e2e/admin-proposals.spec.ts` 的运营手机只读测试同时运行。
+
+```powershell
+# 使用上文同一组仅进程环境变量；完整套件会准备数据库和 H5 并自动启停服务。
+npm run e2e
+# 只运行双用户验收
+npm run e2e -- two-customer-proposals.spec.ts
+```
+
+H5 使用 Taro 默认 hash 路由，直接进入页面用 `http://127.0.0.1:10086/#/pages/items/discover/index` 或 `/#/pages/items/mine/index`。测试由 Playwright 管理端口 3000、10086、5173，运行前需空闲。准备步骤只部署 migration 和更新 seed，不重置业务数据；每次使用唯一物品标题，并清理专用 `.local/e2e-item-images` 测试图片，因此必须使用专用测试库和图片目录。
+
+CI 使用 PostgreSQL 17、Node.js 24.15.0 和 Chromium，顺序执行 lint、typecheck、test、build、verify、e2e 六项检查；浏览器失败保留 Playwright trace 七天。CI 凭据仅用于该临时测试服务。
+
+## Phase 3 原子交接要求
+
+Phase 2 的 CONFIRMED 表示最新方案的所有 2～6 件物品被独占占用 72 小时；它不是订单，现阶段没有订单转换、支付、物流、聊天或售后接口。取消与到期仍由同一提案转换服务原子释放，并保留历史报价与审计。
+
+第三阶段的订单转换必须在服务端占用期限内完成一个数据库事务：锁定并重读提案及按 ID 排序的物品，核验 CONFIRMED、当前修订与报价、参与者和未到期时间；逐条核验全部占用的 proposalId、proposalVersionId 与当前完整快照一致；创建唯一对应订单并原子交接全部占用，同时写幂等结果及不可变审计。与取消、到期扫描及其他接受竞争必须通过同一锁顺序和状态前置条件裁决；失败整笔回滚，不得先释放再异步建单形成可被其他提案抢占的窗口。还需在第三阶段明确转换后提案状态及过期任务边界，补充转换/取消/到期竞争、重复命令和审计失败回滚测试。
