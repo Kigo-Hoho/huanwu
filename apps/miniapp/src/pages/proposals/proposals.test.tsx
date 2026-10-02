@@ -11,6 +11,14 @@ const snapshot = { ...item, itemId: item.id, itemVersion: 1 };
 const proposal: ProposalView = { id: id(5), initiatorId: id(10), recipientId: id(11), responderId: id(11), status: 'PENDING', version: 3, currentVersion: 1, expiresAt: '2026-10-06T00:00:00.000Z', confirmedAt: null, reservationExpiresAt: null, createdAt: item.createdAt, updatedAt: item.updatedAt, versions: [{ id: id(6), number: 1, authorId: id(10), createdAt: item.createdAt, offeredItems: [snapshot], targetItem: { ...snapshot, itemId: id(2), ownerId: id(11), title: '对方背包' }, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 }] };
 
 describe('proposal workbench', () => {
+  it('shows converted status without proposal commands or obsolete no-order guidance', async () => {
+    const converted: ProposalView = { ...proposal, status: 'CONVERTED', orderId: id(20) };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11) }), getProposal: vi.fn().mockResolvedValue(converted), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };
+    render(<ProposalDetailPage api={api} proposalId={proposal.id} />);
+    expect(await screen.findByText('已转换为订单')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /接受方案|拒绝方案|取消提案|修改方案/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('接受后仅占用物品 72 小时，不产生订单或支付。')).not.toBeInTheDocument();
+  });
   it('shows who pays each courier estimate as visible text', () => {
     render(<ProposalForm items={[item]} targetItemId={id(2)} onSubmit={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '选择快递' }));

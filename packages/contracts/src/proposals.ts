@@ -4,7 +4,7 @@ import { CreateItemSchema } from './items.js';
 const uuid = z.string().uuid().toLowerCase();
 const positiveVersion = z.number().int().positive();
 const fen = z.number().int().min(0).max(2_147_483_647);
-export const ProposalStatusSchema = z.enum(['PENDING', 'CONFIRMED', 'REJECTED', 'CANCELLED', 'EXPIRED']);
+export const ProposalStatusSchema = z.enum(['PENDING', 'CONFIRMED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'CONVERTED']);
 export const ProposalSideSchema = z.enum(['INITIATOR', 'RECIPIENT']);
 export const ProposalPayerSchema = z.enum(['NONE', 'INITIATOR', 'RECIPIENT']);
 export const DeliveryModeSchema = z.enum(['COURIER', 'IN_PERSON']);
@@ -52,7 +52,8 @@ export const ProposalViewSchema = z.object({
   expiresAt: z.iso.datetime(), confirmedAt: z.iso.datetime().nullable(), reservationExpiresAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
   versions: z.array(ProposalVersionViewSchema).min(1),
-});
+  orderId: uuid.nullable().optional(),
+}).refine(value => value.status !== 'CONVERTED' || value.orderId != null, 'Converted proposals require an order ID');
 export type PublicItemView = z.infer<typeof PublicItemViewSchema>;
 export type PublicItemList = z.infer<typeof PublicItemListSchema>;
 export type CreateProposalInput = z.infer<typeof CreateProposalSchema>;

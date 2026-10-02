@@ -5,7 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { apiClient, type ProposalReadApi } from '../../lib/api-client';
 import { formatFen, formatUtc } from '../review/review-queue-page';
 
-const labels = { PENDING: '待回应', CONFIRMED: '已确认', REJECTED: '已拒绝', CANCELLED: '已取消', EXPIRED: '已到期' };
+const labels = { PENDING: '待回应', CONFIRMED: '已确认', REJECTED: '已拒绝', CANCELLED: '已取消', EXPIRED: '已到期', CONVERTED: '已转换为订单' };
 const detailLink = (p: ProposalView) => <Link to={`/proposals/${p.id}`}>查看提案 {p.id}</Link>;
 function useProposalRead<T>(load: () => Promise<T>, dependencies: unknown[]) {
   const [value, setValue] = useState<T | null>(null);
