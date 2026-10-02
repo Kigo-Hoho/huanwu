@@ -29,6 +29,21 @@ async function fundsReady(id: string) {
     await tx.order.update({ where: { id }, data: { status: 'AWAITING_FULFILLMENT', fulfillmentDeadline: new Date(h.clock.now().getTime() + 72 * 3600000) } });
   });
 }
+it.each(['self', 'outgoing'] as const)('reads frozen maximum escaped shipping details through %s GET after successful saves', async access => {
+  const order = await courier();
+  const escaped = { recipientName: '\u0001'.repeat(80), phone: '\u0001'.repeat(32), region: '\u0001'.repeat(200), detail: '\u0001'.repeat(500) };
+  const saved = await h.command(h.actors.initiator, `/api/orders/${order.id}/address`, { ...escaped, expectedVersion: 1 }).expect(200);
+  await h.command(h.actors.recipient, `/api/orders/${order.id}/address`, { ...theirs, expectedVersion: 2 }).expect(200);
+  await fundsReady(order.id);
+  const actor = access === 'self' ? h.actors.initiator : h.actors.recipient;
+  const response = await h.get(actor, `/api/orders/${order.id}/shipping-address?side=${access}`).expect(200);
+  expect(response.body).toEqual({ ...escaped, orderId: order.id, side: 'INITIATOR', version: 1 });
+  const row = await h.prisma.orderAddress.findUniqueOrThrow({ where: { orderId_side: { orderId: order.id, side: 'INITIATOR' } } });
+  expect(row.frozenAt).not.toBeNull(); expect(row.ciphertext.length).toBeGreaterThan(4096);
+  const persisted = JSON.stringify({ saved: saved.body, row, cache: await h.prisma.idempotencyRecord.findMany({ where: { commandName: 'SAVE_ORDER_ADDRESS', actorId: h.actors.initiator.id } }), audits: await h.prisma.auditLog.findMany({ where: { entityId: { in: [order.id, row.id] } } }) });
+  expect(persisted).not.toContain(JSON.stringify(escaped.phone).slice(1, -1));
+  expect(persisted).not.toContain(JSON.stringify(escaped.detail).slice(1, -1));
+});
 it('stores only encrypted own-side data and returns safe results, summaries, caches and audits', async () => {
   const order = await courier(); const key = randomUUID();
   const first = await h.command(h.actors.initiator, `/api/orders/${order.id}/address`, { ...mine, expectedVersion: 1 }, key).expect(200);

@@ -19,6 +19,15 @@ it('round trips only authenticated addresses with a fresh 12-byte nonce and 16-b
   expect(first.nonce).not.toEqual(second.nonce); expect(first.ciphertext).not.toEqual(second.ciphertext);
   expect(Buffer.from(first.ciphertext).toString('utf8')).not.toContain(address.phone);
 });
+it('round trips maximum schema-valid escaped strings and metadata without narrowing shared limits', () => {
+  const maximalContext = { ...context, version: Number.MAX_SAFE_INTEGER };
+  const maximal = { ...maximalContext, recipientName: '\u0001'.repeat(80), phone: '\u0001'.repeat(32), region: '\u0001'.repeat(200), detail: '\u0001'.repeat(500) };
+  const cipher = new AddressCipher(); const encrypted = cipher.encrypt(maximal, maximalContext);
+  // 812 accepted UTF16 units may each occupy six JSON escape bytes; fixed
+  // keys/punctuation/UUID/side and the maximum safe version add 150 bytes.
+  expect(encrypted.ciphertext).toHaveLength(5022);
+  expect(cipher.decrypt(encrypted, maximalContext)).toEqual(maximal);
+});
 it('rejects ciphertext replay into a different order, side or address version', () => {
   const cipher = new AddressCipher(); const encrypted = cipher.encrypt(address, context);
   for (const other of [{ ...context, orderId: randomUUID() }, { ...context, side: 'RECIPIENT' as const }, { ...context, version: 2 }]) {
@@ -43,7 +52,7 @@ it('rejects malformed encryption envelopes, contexts and authenticated non-addre
   }
   for (const malformed of [{ ...context, orderId: 'invalid' }, { ...context, version: 0 }, { ...context, version: 1.5 }]) expect(() => cipher.decrypt(encrypted, malformed)).toThrow();
   // Use the public AAD format to build valid authentication around invalid JSON/data.
-  for (const plaintext of ['not-json', JSON.stringify({ ...address, phone: '', version: 2 }), JSON.stringify({ ...address, extra: 'private' })]) {
+  for (const plaintext of ['not-json', JSON.stringify({ ...address, phone: '', version: 2 }), JSON.stringify({ ...address, extra: 'private' }), JSON.stringify(address).padEnd(8193, ' ')]) {
     const nonce = randomBytes(12);
     const raw = createCipheriv('aes-256-gcm', Buffer.from(process.env.ADDRESS_ENCRYPTION_KEY_BASE64!, 'base64'), nonce, { authTagLength: 16 });
     raw.setAAD(Buffer.from(JSON.stringify(['order-address-v1', context.orderId, context.side, context.version, 'test-v1'])));
