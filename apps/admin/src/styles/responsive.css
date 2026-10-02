@@ -5,6 +5,30 @@
     Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
 }
 
+.workspace-nav {
+  display: flex;
+  gap: 24px;
+  padding: 14px 24px;
+}
+
+.proposal-page {
+  overflow-wrap: anywhere;
+}
+
+.proposal-page > .ant-card {
+  margin-block: 16px;
+}
+
+.proposal-page .ant-card-head-title {
+  white-space: normal;
+}
+
+.proposal-sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 24px;
+}
+
 * {
   box-sizing: border-box;
 }

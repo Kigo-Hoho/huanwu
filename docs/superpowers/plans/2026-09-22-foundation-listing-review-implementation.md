@@ -1,5 +1,7 @@
 # Foundation and Listing Review Implementation Plan
 
+Phase 1 remains the completed publishing/review baseline. Phase 2 proceeds under [the proposal implementation plan](2026-09-29-barter-proposals-implementation.md); its contracts and persistence do not add proposals to the Phase 1 scope or create orders/payments.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the first working vertical slice in which a WeChat user creates and submits an item, an authorized operator reviews it from a responsive web workspace, and every state change is permission-checked and audited.

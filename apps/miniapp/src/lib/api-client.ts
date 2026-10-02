@@ -1,6 +1,15 @@
 import {
   CreateItemSchema,
+  CreateProposalSchema,
+  CounterProposalSchema,
+  AcceptProposalSchema,
+  type CreateProposalInput,
+  type CounterProposalInput,
+  type ProposalCommandInput,
+  type ProposalView,
   type ItemView,
+  type PublicItemList,
+  type PublicItemView,
   type Role,
 } from '@barter/contracts';
 import Taro from '@tarojs/taro';
@@ -110,6 +119,27 @@ export class AuthenticatedApiClient {
     return this.authorized<ItemView[]>('/api/me/items', 'GET', undefined, {}, true);
   }
 
+  getMe(): Promise<{ id: string; roles: Role[] }> {
+    return this.authorized('/api/me', 'GET', undefined, {}, true);
+  }
+
+  listProposals(direction: 'sent' | 'received'): Promise<ProposalView[]> {
+    return this.authorized(`/api/me/proposals?direction=${direction}`, 'GET', undefined, {}, true);
+  }
+
+  getProposal(id: string): Promise<ProposalView> {
+    return this.authorized(`/api/proposals/${encodeURIComponent(id)}`, 'GET', undefined, {}, true);
+  }
+
+  createProposal(input: CreateProposalInput, key: string): Promise<ProposalView> {
+    return this.authorized('/api/proposals', 'POST', CreateProposalSchema.parse(input), { 'Idempotency-Key': key }, true);
+  }
+
+  commandProposal(id: string, action: 'counter' | 'accept' | 'reject' | 'cancel', input: CounterProposalInput | ProposalCommandInput, key: string): Promise<ProposalView> {
+    const body = action === 'counter' ? CounterProposalSchema.parse(input) : AcceptProposalSchema.parse(input);
+    return this.authorized(`/api/proposals/${encodeURIComponent(id)}/${action}`, 'POST', body, { 'Idempotency-Key': key }, true);
+  }
+
   getMyItem(itemId: string): Promise<ItemView> {
     return this.authorized<ItemView>(
       `/api/me/items/${encodeURIComponent(itemId)}`,
@@ -118,6 +148,15 @@ export class AuthenticatedApiClient {
       {},
       true,
     );
+  }
+
+  listPublicItems(cursor?: string): Promise<PublicItemList> {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    return this.send<PublicItemList>({ url: `/api/items${query}`, method: 'GET' });
+  }
+
+  getPublicItem(itemId: string): Promise<PublicItemView> {
+    return this.send<PublicItemView>({ url: `/api/items/${encodeURIComponent(itemId)}`, method: 'GET' });
   }
 
   private async authorized<T>(

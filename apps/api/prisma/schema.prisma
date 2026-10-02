@@ -29,17 +29,21 @@ enum ItemStatus {
 }
 
 model User {
-  id              String              @id @default(uuid()) @db.Uuid
-  wechatOpenid    String?             @unique
-  displayName     String?
-  disabledAt      DateTime?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  roles           UserRole[]
-  adminCredential AdminCredential?
-  items           Item[]
-  auditLogs       AuditLog[]
-  idempotencyKeys IdempotencyRecord[]
+  id                  String              @id @default(uuid()) @db.Uuid
+  wechatOpenid        String?             @unique
+  displayName         String?
+  disabledAt          DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  roles               UserRole[]
+  adminCredential     AdminCredential?
+  items               Item[]
+  auditLogs           AuditLog[]
+  idempotencyKeys     IdempotencyRecord[]
+  initiatedProposals  Proposal[]          @relation("ProposalInitiator")
+  receivedProposals   Proposal[]          @relation("ProposalRecipient")
+  respondingProposals Proposal[]          @relation("ProposalResponder")
+  authoredVersions    ProposalVersion[]
 }
 
 model UserRole {
@@ -62,20 +66,22 @@ model AdminCredential {
 }
 
 model Item {
-  id                String        @id @default(uuid()) @db.Uuid
-  ownerId           String        @db.Uuid
+  id                String                @id @default(uuid()) @db.Uuid
+  ownerId           String                @db.Uuid
   title             String
   description       String
   referenceValueFen Int
   condition         ItemCondition
-  status            ItemStatus    @default(DRAFT)
+  status            ItemStatus            @default(DRAFT)
   wantedText        String
   rejectReason      String?
-  version           Int           @default(1)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  owner             User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  version           Int                   @default(1)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  owner             User                  @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   images            ItemImage[]
+  proposalSnapshots ProposalVersionItem[]
+  reservation       ItemReservation?
 
   @@index([ownerId, status])
   @@index([status, updatedAt])
@@ -116,9 +122,114 @@ model IdempotencyRecord {
   commandName String
   key         String
   response    Json
+  requestHash String?
   createdAt   DateTime @default(now())
   actor       User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
 
   @@unique([actorId, commandName, key])
   @@index([actorId, createdAt])
+}
+
+enum ProposalStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum ProposalSide {
+  INITIATOR
+  RECIPIENT
+}
+
+enum ProposalPayer {
+  NONE
+  INITIATOR
+  RECIPIENT
+}
+
+enum DeliveryMode {
+  COURIER
+  IN_PERSON
+}
+
+model Proposal {
+  id                   String            @id @default(uuid()) @db.Uuid
+  initiatorId          String            @db.Uuid
+  recipientId          String            @db.Uuid
+  responderId          String            @db.Uuid
+  status               ProposalStatus    @default(PENDING)
+  version              Int               @default(1)
+  currentVersion       Int               @default(1)
+  expiresAt            DateTime
+  confirmedAt          DateTime?
+  reservationExpiresAt DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  initiator            User              @relation("ProposalInitiator", fields: [initiatorId], references: [id], onDelete: Restrict)
+  recipient            User              @relation("ProposalRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  responder            User              @relation("ProposalResponder", fields: [responderId], references: [id], onDelete: Restrict)
+  versions             ProposalVersion[]
+  reservations         ItemReservation[]
+
+  @@index([initiatorId, createdAt, id])
+  @@index([recipientId, createdAt, id])
+  @@index([status, expiresAt])
+  @@index([status, reservationExpiresAt])
+}
+
+model ProposalVersion {
+  id                   String                @id @default(uuid()) @db.Uuid
+  proposalId           String                @db.Uuid
+  number               Int
+  authorId             String                @db.Uuid
+  differenceFen        Int
+  payer                ProposalPayer
+  deliveryMode         DeliveryMode
+  initiatorShippingFen Int
+  recipientShippingFen Int
+  createdAt            DateTime              @default(now())
+  proposal             Proposal              @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  author               User                  @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  items                ProposalVersionItem[]
+  reservations         ItemReservation[]
+
+  @@unique([proposalId, number])
+}
+
+model ProposalVersionItem {
+  id                String          @id @default(uuid()) @db.Uuid
+  proposalVersionId String          @db.Uuid
+  itemId            String          @db.Uuid
+  ownerId           String          @db.Uuid
+  side              ProposalSide
+  sortOrder         Int
+  itemVersion       Int
+  title             String
+  description       String
+  referenceValueFen Int
+  condition         ItemCondition
+  wantedText        String
+  imageUrls         String[]
+  proposalVersion   ProposalVersion @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
+  item              Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([proposalVersionId, itemId])
+  @@unique([proposalVersionId, side, sortOrder])
+  @@index([itemId])
+}
+
+model ItemReservation {
+  itemId            String          @id @db.Uuid
+  proposalId        String          @db.Uuid
+  proposalVersionId String          @db.Uuid
+  expiresAt         DateTime
+  createdAt         DateTime        @default(now())
+  item              Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  proposal          Proposal        @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  proposalVersion   ProposalVersion @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
+
+  @@index([proposalId])
+  @@index([expiresAt])
 }

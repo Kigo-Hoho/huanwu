@@ -4,6 +4,7 @@ import {
   RoleValues,
   type ApiErrorBody,
   type ItemView,
+  type ProposalView,
   type Role,
 } from '@barter/contracts';
 
@@ -56,7 +57,12 @@ export interface ReviewApi {
   reviewItem(itemId: string, input: ReviewItemInput): Promise<OperatorItem>;
 }
 
-export interface AdminApiClient extends ReviewApi {
+export interface ProposalReadApi {
+  listProposals(): Promise<ProposalView[]>;
+  getProposal(id: string): Promise<ProposalView>;
+}
+
+export interface AdminApiClient extends ReviewApi, ProposalReadApi {
   login(email: string, password: string): Promise<AuthSession>;
   bootstrapSession(): Promise<OperatorUser | null>;
   logout(): void;
@@ -264,6 +270,14 @@ export function createApiClient(options: {
 
     listPendingItems() {
       return request<OperatorItem[]>('/admin/items?status=PENDING_REVIEW');
+    },
+
+    listProposals() {
+      return request<ProposalView[]>('/admin/proposals');
+    },
+
+    getProposal(id) {
+      return request<ProposalView>(`/admin/proposals/${encodeURIComponent(id)}`);
     },
 
     getReviewItem(itemId) {

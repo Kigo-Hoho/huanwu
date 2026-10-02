@@ -80,9 +80,13 @@ function currentRouteItemId(): string {
 export function CreateItemPage({
   dependencies = defaultDependencies,
   itemId,
+  navigateToDiscover = () => { void Taro.navigateTo({ url: '/pages/items/discover/index' }); },
+  navigateToMyItems = () => { void Taro.navigateTo({ url: '/pages/items/mine/index' }); },
 }: {
   dependencies?: CreateItemDependencies;
   itemId?: string;
+  navigateToDiscover?: () => void;
+  navigateToMyItems?: () => void;
 }) {
   const [editingItemId] = useState(() => itemId ?? currentRouteItemId());
   const [title, setTitle] = useState('');
@@ -214,6 +218,8 @@ export function CreateItemPage({
   if (submitted) {
     return (
       <View>
+        <Button {...buttonRole} onClick={navigateToDiscover}>找换</Button>
+        <Button {...buttonRole} onClick={navigateToMyItems}>我的物品</Button>
         <Text>等待平台审核</Text>
         <Text>PENDING_REVIEW</Text>
       </View>
@@ -222,6 +228,8 @@ export function CreateItemPage({
 
   return (
     <View>
+      <Button {...buttonRole} onClick={navigateToDiscover}>找换</Button>
+      <Button {...buttonRole} onClick={navigateToMyItems}>我的物品</Button>
       <Label>
         <Text>物品名称</Text>
         <Input

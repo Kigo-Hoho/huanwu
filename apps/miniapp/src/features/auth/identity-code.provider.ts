@@ -22,7 +22,13 @@ export class AcceptanceH5IdentityCodeProvider implements IdentityCodeProvider {
     if (!__ACCEPTANCE_IDENTITY_CODE__) {
       throw new Error('The acceptance identity code was not enabled for this build.');
     }
-    return __ACCEPTANCE_IDENTITY_CODE__;
+    const code = typeof __BARTER_ACCEPTANCE_IDENTITY_CODE__ === 'undefined'
+      ? __ACCEPTANCE_IDENTITY_CODE__
+      : __BARTER_ACCEPTANCE_IDENTITY_CODE__;
+    if (code !== 'e2e-customer-code' && code !== 'e2e-customer-two-code') {
+      throw new Error('Invalid acceptance identity code.');
+    }
+    return code;
   }
 }
 
