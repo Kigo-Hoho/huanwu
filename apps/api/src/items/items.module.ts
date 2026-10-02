@@ -8,9 +8,10 @@ import { ItemsController } from './items.controller.js';
 import { ItemsService } from './items.service.js';
 import { PublicItemsController } from './public-items.controller.js';
 import { PublicItemsService } from './public-items.service.js';
+import { ClockModule } from '../common/clock.module.js';
 
 @Module({
-  imports: [AuthModule, AuditModule],
+  imports: [AuthModule, AuditModule, ClockModule],
   controllers: [ItemsController, AdminItemsController, PublicItemsController],
   providers: [ItemsService, ItemReviewService, PublicItemsService],
   exports: [ItemsService],

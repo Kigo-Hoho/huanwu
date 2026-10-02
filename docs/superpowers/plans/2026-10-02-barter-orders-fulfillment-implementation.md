@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-02-barter-orders-fulfillment-design.md`。
 
-**Baseline:** `main@1859fa4`，规格提交 `1bf9765`，分支 `codex/phase3-orders-fulfillment`。本计划等待书面审阅；用户已指定逐任务新实现代理及新审查代理，不需重新选择执行方式。
+**Baseline:** `main@1859fa4`，规格提交 `1bf9765`，分支 `codex/phase3-orders-fulfillment`。本计划已获用户确认并执行；沿用逐任务新实现代理及新审查代理方式。
 
 ## Global Constraints
 
@@ -107,7 +107,7 @@ expect(dueDeadline({ ...paymentOrder, status: 'SETTLING' }, farFuture)).toBeNull
 
 ## Task 2: 增量持久化、统一占用和独立测试库
 
-**Files:** Modify `apps/api/prisma/schema.prisma`，新增 `apps/api/prisma/migrations/<Prisma生成时间戳>_orders/migration.sql`；Create reservations 三个文件、`reservation-policy.spec.ts`；Modify `items/public-items.service.ts`、`items/items.module.ts`、`proposals/proposals.service.ts`、`proposals/proposals.module.ts`、`proposals/proposal.mapper.ts`；Create `apps/api/vitest.phase3.config.ts`、`test/phase3/support/database-global-setup.ts`、`database-fixtures.ts`、`persistence.e2e-spec.ts`、`migration-upgrade.e2e-spec.ts`；Modify API package.json、vitest.config.ts、tsconfig.json。
+**Files:** Modify `apps/api/prisma/schema.prisma`、`prisma.config.ts`，新增 `apps/api/prisma/migrations/<Prisma生成时间戳>_orders/migration.sql`；Create reservations 三个文件、`reservation-policy.spec.ts`；Modify `items/public-items.service.ts`、`items/items.module.ts`、`proposals/proposals.service.ts`、`proposals/proposals.module.ts`、`proposals/proposal.mapper.ts`；Create `apps/api/vitest.phase3.config.ts`、`test/phase3/support/database-global-setup.ts`、`database-fixtures.ts`、`legacy-database-global-setup.ts`、`legacy-database-setup.ts`、`persistence.e2e-spec.ts`、`migration-upgrade.e2e-spec.ts`；Modify API package.json、vitest.config.ts、tsconfig.json、package-lock.json，以及六个旧 API 集成测试的文件边界清理（admin-item-review、auth-rbac、customer-items、item-image-upload、proposals、public-items）。
 
 **Interfaces:** `reservationIsAvailable(reservation:ItemReservation|null,now:Date):boolean`；`ReservationsService.lockItems(tx,ids:string[]):Promise<void>`、`assertProposalLease(tx,proposalId,proposalVersionId,itemIds,now):Promise<void>`、`handoffToOrder(tx,proposalId,orderId,itemIds):Promise<void>`、`releaseOrder(tx,orderId):Promise<void>`。测试支持 `createPhase3Database():Promise<{url:string,close():Promise<void>}>`。
 
@@ -121,8 +121,10 @@ await expect(insertReservationWithTwoOwners()).rejects.toThrow(/check constraint
 ```
 
 - [ ] **Step 2: 观察 RED。** 单独运行 policy 测试；数据库正常后 `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts persistence.e2e-spec.ts migration-upgrade.e2e-spec.ts`。缺表／字段／约束是预期 RED。
-- [ ] **Step 3: 最小实现。** 按固定模型键生成未应用迁移并用 apply_patch 加 CHECK、触发器、部分唯一索引；`npm run db:migrate --workspace @barter/api -- --create-only --name orders`，确认只指向专用开发库，不同意 drift reset。generate 后逐一改造创建／counter／accept／公开查询的占用判定，处理 expiresAt 可空；取消和 expire 只释放提案所有者行，按同一排序锁定。ProposalsModule 注入 CLOCK，将裁决当前时间改为 Clock.now，默认行为不变，让转换与提案清理共用测试时钟。
-- [ ] **Step 4: GREEN。** 在临时 PostgreSQL 库运行迁移和上述测试、旧 proposals／public-items 测试及 typecheck。新数据库配置仅包含 `test/phase3/**/*.e2e-spec.ts`，原配置排除这一目录；API `test` 顺序运行原配置和 phase3 配置，lint／tsconfig 显式包含新配置文件。global setup 创建已迁移的临时模板，每个新测试文件克隆独立数据库；配置使用隔离 worker、禁止同文件并发，初始化 AppModule／PrismaService 前将该 worker 的 DATABASE_URL 设为自己的库，close 时关闭 app／clients、恢复原环境并清理。所有名字必须符合 `barter_p3_<本次随机命名空间>_*`、小于 PostgreSQL 标识长度；退出关闭连接后只删除自己创建的数据库，绝不删除 DATABASE_URL 原库。失败保留清理错误，不强删无关数据。原库不需要禁用新历史保护触发器。
+- [ ] **Step 3: 最小实现。** 按固定模型键生成未应用迁移并用 apply_patch 加 CHECK、触发器、部分唯一索引，包括 AuditLog 的 UPDATE／DELETE 不可变保护；`npm run db:migrate --workspace @barter/api -- --create-only --name orders`，开发库与显式 SHADOW_DATABASE_URL 均限制在本次随机命名空间，不同意 drift reset。generate 后逐一改造创建／counter／accept／公开查询的占用判定，处理 expiresAt 可空；取消和 expire 只释放提案所有者行，按同一排序锁定。ProposalsModule 注入 CLOCK，将裁决当前时间改为 Clock.now，默认行为不变，让转换与提案清理共用测试时钟。
+- [ ] **Step 4: GREEN。** 在临时 PostgreSQL 库运行迁移和上述测试、旧 proposals／public-items 测试及 typecheck。新数据库配置仅包含 `test/phase3/**/*.e2e-spec.ts`，原配置排除这一目录；API `test` 顺序运行原配置和 phase3 配置，lint／tsconfig 显式包含新配置文件。global setup 创建已迁移的临时模板，旧 API 配置的模板另执行原种子；每个新旧集成测试文件克隆独立数据库，纯单元测试不分配数据库。旧配置 setupFiles 在测试模块求值前设置 DATABASE_URL，覆盖顶层 Prisma 构造；保留文件并行、禁止同文件并发，以逆序 afterAll 在文件 app／client 关闭后清理并恢复环境。删除旧文件边界的审计／报价／用户清理和 DISABLE TRIGGER 绕过，文件内原测试断言、业务性 fixture 操作保持。所有名字必须符合 `barter_p3_<本次随机命名空间>_*`、小于 PostgreSQL 标识长度；退出关闭连接后只删除自己创建的数据库，绝不删除 DATABASE_URL 原库。失败保留清理错误，不强删无关数据。
+
+**Task 2 范围澄清（2026-10-02）：** 规格要求审计历史数据库不可变，但前两次迁移缺少 AuditLog 保护，旧测试通过删除审计和临时禁用报价保护清理共享数据库。执行控制器确认以新增迁移补齐保护，并最小扩展旧集成测试隔离，按文件丢弃本次拥有的临时库；不修改旧迁移、关闭保护或通过串行化隐藏冲突。
 - [ ] **Step 5: 审查并提交。** `feat: persist orders and unify item reservations`。记录升级证据；数据库未可用时不得声称任务完成。
 
 ## Task 3: 原子建单、订单查询与用户命令边界

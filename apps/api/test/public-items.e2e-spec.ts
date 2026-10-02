@@ -19,35 +19,12 @@ describe('public item discovery', () => {
   let hiddenId: string;
   let activeIds: string[];
 
-  async function cleanup() {
-    const users = await prisma.user.findMany({ where: { wechatOpenid: { startsWith: prefix } }, select: { id: true } });
-    const userIds = users.map(({ id }) => id);
-    if (!userIds.length) return;
-    const items = await prisma.item.findMany({ where: { ownerId: { in: userIds } }, select: { id: true } });
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" DISABLE TRIGGER "ProposalVersion_immutable"');
-      await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" DISABLE TRIGGER "ProposalVersionItem_immutable"');
-      try {
-        await tx.itemReservation.deleteMany({ where: { itemId: { in: items.map(({ id }) => id) } } });
-        await tx.proposalVersionItem.deleteMany({ where: { itemId: { in: items.map(({ id }) => id) } } });
-        await tx.proposalVersion.deleteMany({ where: { proposal: { initiatorId: { in: userIds } } } });
-        await tx.proposal.deleteMany({ where: { initiatorId: { in: userIds } } });
-        await tx.item.deleteMany({ where: { ownerId: { in: userIds } } });
-        await tx.user.deleteMany({ where: { id: { in: userIds } } });
-      } finally {
-        await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" ENABLE TRIGGER "ProposalVersionItem_immutable"');
-        await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" ENABLE TRIGGER "ProposalVersion_immutable"');
-      }
-    });
-  }
-
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
-    await cleanup();
     const owner = await prisma.user.create({ data: { wechatOpenid: `${prefix}-owner`, roles: { create: { role: 'CUSTOMER' } } } });
     const recipient = await prisma.user.create({ data: { wechatOpenid: `${prefix}-recipient`, roles: { create: { role: 'CUSTOMER' } } } });
     ownerId = owner.id;
@@ -85,7 +62,7 @@ describe('public item discovery', () => {
     ] });
   });
 
-  afterAll(async () => { if (prisma) await cleanup(); if (app) await app.close(); });
+  afterAll(async () => { if (app) await app.close(); });
 
   it('commits a complete reservation proposal that operator reads can map', async () => {
     const proposal = await prisma.proposal.findFirstOrThrow({ where: { initiatorId: ownerId }, include: proposalInclude });

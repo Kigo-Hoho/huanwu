@@ -31,7 +31,6 @@ function signCustomerToken(userId: string): string {
 describe('item image uploads', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let customerId: string;
   let operatorId: string;
   let customerToken: string;
   let operatorToken: string;
@@ -52,14 +51,9 @@ describe('item image uploads', () => {
     configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
-    await prisma.user.deleteMany({ where: { wechatOpenid: openid } });
-    await prisma.user.deleteMany({
-      where: { adminCredential: { email: 'task-5-upload-operator@example.test' } },
-    });
     const customer = await prisma.user.create({
       data: { wechatOpenid: openid, roles: { create: { role: 'CUSTOMER' } } },
     });
-    customerId = customer.id;
     customerToken = signCustomerToken(customer.id);
     const operator = await prisma.user.create({
       data: {
@@ -93,12 +87,6 @@ describe('item image uploads', () => {
   });
 
   afterAll(async () => {
-    if (prisma && customerId) {
-      await prisma.auditLog.deleteMany({ where: { actorId: customerId } });
-      await prisma.user.deleteMany({
-        where: { id: { in: [customerId, operatorId] } },
-      });
-    }
     if (app) await app.close();
     if (storageDirectory) await rm(storageDirectory, { recursive: true, force: true });
     if (originalEnv.jwtSecret === undefined) delete process.env.JWT_SECRET;

@@ -44,6 +44,8 @@ model User {
   receivedProposals   Proposal[]          @relation("ProposalRecipient")
   respondingProposals Proposal[]          @relation("ProposalResponder")
   authoredVersions    ProposalVersion[]
+  initiatedOrders     Order[]             @relation("OrderInitiator")
+  receivedOrders      Order[]             @relation("OrderRecipient")
 }
 
 model UserRole {
@@ -82,6 +84,7 @@ model Item {
   images            ItemImage[]
   proposalSnapshots ProposalVersionItem[]
   reservation       ItemReservation?
+  orderSnapshots    OrderItemSnapshot[]
 
   @@index([ownerId, status])
   @@index([status, updatedAt])
@@ -136,6 +139,7 @@ enum ProposalStatus {
   REJECTED
   CANCELLED
   EXPIRED
+  CONVERTED
 }
 
 enum ProposalSide {
@@ -172,6 +176,7 @@ model Proposal {
   responder            User              @relation("ProposalResponder", fields: [responderId], references: [id], onDelete: Restrict)
   versions             ProposalVersion[]
   reservations         ItemReservation[]
+  order                Order?
 
   @@index([initiatorId, createdAt, id])
   @@index([recipientId, createdAt, id])
@@ -194,6 +199,7 @@ model ProposalVersion {
   author               User                  @relation(fields: [authorId], references: [id], onDelete: Restrict)
   items                ProposalVersionItem[]
   reservations         ItemReservation[]
+  orders               Order[]
 
   @@unique([proposalId, number])
 }
@@ -221,15 +227,373 @@ model ProposalVersionItem {
 }
 
 model ItemReservation {
-  itemId            String          @id @db.Uuid
-  proposalId        String          @db.Uuid
-  proposalVersionId String          @db.Uuid
-  expiresAt         DateTime
-  createdAt         DateTime        @default(now())
-  item              Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  proposal          Proposal        @relation(fields: [proposalId], references: [id], onDelete: Restrict)
-  proposalVersion   ProposalVersion @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
+  itemId            String           @id @db.Uuid
+  proposalId        String?          @db.Uuid
+  proposalVersionId String?          @db.Uuid
+  orderId           String?          @db.Uuid
+  expiresAt         DateTime?
+  createdAt         DateTime         @default(now())
+  item              Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  proposal          Proposal?        @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  proposalVersion   ProposalVersion? @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
+  order             Order?           @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   @@index([proposalId])
   @@index([expiresAt])
+  @@index([orderId])
+}
+
+enum OrderStatus {
+  AWAITING_DETAILS
+  AWAITING_PAYMENT
+  AWAITING_FULFILLMENT
+  IN_TRANSIT
+  AWAITING_ACCEPTANCE
+  SETTLING
+  COMPLETED
+  CANCEL_PENDING
+  CANCELLED
+  ON_HOLD
+}
+
+enum OrderSide {
+  INITIATOR
+  RECIPIENT
+}
+
+enum PaymentPurpose {
+  DEPOSIT
+  DIFFERENCE
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  PAID
+  CLOSED
+  REFUNDED
+  UNKNOWN
+  FAILED
+}
+
+enum ShipmentStatus {
+  REGISTERED
+  COLLECTED
+  DELIVERED
+  EXCEPTION
+}
+
+enum OrderCancellationStatus {
+  REQUESTED
+  AGREED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum FinancialEntryType {
+  PAYMENT
+  REFUND
+  DIFFERENCE_SETTLEMENT
+}
+
+enum IntegrationOperationKind {
+  CREATE_PAYMENT
+  CLOSE_PAYMENT
+  REFUND_PAYMENT
+  SETTLE_DIFFERENCE
+  VERIFY_SHIPMENT
+  QUERY_SHIPMENT
+}
+
+enum IntegrationEventKind {
+  PAYMENT_SUCCEEDED
+  PAYMENT_CLOSED
+  REFUND_SUCCEEDED
+  DIFFERENCE_SETTLED
+  SHIPMENT_PROGRESS
+}
+
+enum IntegrationReceiptStatus {
+  PENDING
+  PROCESSED
+  REJECTED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  UNKNOWN
+  FAILED
+}
+
+enum ProviderResultStatus {
+  PENDING
+  SUCCESS
+  FAILURE
+  UNKNOWN
+}
+
+model Order {
+  id                     String               @id @default(uuid()) @db.Uuid
+  proposalId             String               @unique @db.Uuid
+  proposalVersionId      String               @db.Uuid
+  initiatorId            String               @db.Uuid
+  recipientId            String               @db.Uuid
+  status                 OrderStatus
+  version                Int                  @default(1)
+  rulesVersion           String
+  depositFen             Int
+  feeFen                 Int
+  detailsHours           Int
+  paymentHours           Int
+  fulfillmentHours       Int
+  inspectionHours        Int
+  differenceFen          Int
+  payer                  ProposalPayer
+  deliveryMode           DeliveryMode
+  initiatorShippingFen   Int
+  recipientShippingFen   Int
+  simulation             Boolean
+  detailsDeadline        DateTime?
+  paymentDeadline        DateTime?
+  fulfillmentDeadline    DateTime?
+  holdReason             String?
+  holdPreviousStatus     OrderStatus?
+  heldAt                 DateTime?
+  outstandingObligations Json?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  proposal               Proposal             @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  proposalVersion        ProposalVersion      @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
+  initiator              User                 @relation("OrderInitiator", fields: [initiatorId], references: [id], onDelete: Restrict)
+  recipient              User                 @relation("OrderRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  items                  OrderItemSnapshot[]
+  parties                OrderPartyProgress[]
+  addresses              OrderAddress[]
+  payments               PaymentIntent[]
+  shipments              Shipment[]
+  cancellations          OrderCancellation[]
+  outboxCommands         OutboxCommand[]
+  reservations           ItemReservation[]
+
+  @@index([initiatorId, createdAt, id])
+  @@index([recipientId, createdAt, id])
+  @@index([status, detailsDeadline])
+  @@index([status, paymentDeadline])
+  @@index([status, fulfillmentDeadline])
+}
+
+model OrderItemSnapshot {
+  id                String        @id @default(uuid()) @db.Uuid
+  orderId           String        @db.Uuid
+  itemId            String        @db.Uuid
+  ownerId           String        @db.Uuid
+  side              OrderSide
+  sortOrder         Int
+  itemVersion       Int
+  title             String
+  description       String
+  referenceValueFen Int
+  condition         ItemCondition
+  wantedText        String
+  imageUrls         String[]
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  item              Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, itemId])
+  @@unique([orderId, side, sortOrder])
+  @@index([itemId])
+}
+
+model OrderPartyProgress {
+  id                  String    @id @default(uuid()) @db.Uuid
+  orderId             String    @db.Uuid
+  side                OrderSide
+  addressReady        Boolean   @default(false)
+  fundsReady          Boolean   @default(false)
+  handedOverAt        DateTime?
+  incomingDeliveredAt DateTime?
+  acceptanceDeadline  DateTime?
+  acceptedAt          DateTime?
+  order               Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, side])
+  @@index([acceptanceDeadline])
+}
+
+model OrderAddress {
+  id         String    @id @default(uuid()) @db.Uuid
+  orderId    String    @db.Uuid
+  side       OrderSide
+  version    Int       @default(1)
+  keyVersion String
+  ciphertext Bytes
+  nonce      Bytes
+  tag        Bytes
+  frozenAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, side])
+}
+
+model PaymentIntent {
+  id                    String           @id @default(uuid()) @db.Uuid
+  orderId               String           @db.Uuid
+  side                  OrderSide
+  purpose               PaymentPurpose
+  amountFen             Int
+  currency              String           @default("CNY")
+  businessNo            String           @unique
+  provider              String
+  status                PaymentStatus    @default(CREATED)
+  externalTransactionId String?
+  checkoutParams        Json?
+  paidAt                DateTime?
+  closedAt              DateTime?
+  refundedAt            DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  order                 Order            @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  entries               FinancialEntry[]
+
+  @@unique([orderId, side, purpose])
+}
+
+model IntegrationEvent {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  provider              String
+  eventId               String
+  kind                  IntegrationEventKind
+  businessNo            String
+  occurredAt            DateTime
+  externalTransactionId String?
+  amountFen             Int?
+  currency              String?
+  shipmentId            String?                  @db.Uuid
+  progress              ShipmentStatus?
+  payload               Json
+  createdAt             DateTime                 @default(now())
+  receipt               IntegrationEventReceipt?
+  financialEntries      FinancialEntry[]
+  shipmentEvents        ShipmentEvent[]
+
+  @@unique([provider, eventId])
+  @@index([businessNo])
+}
+
+model IntegrationEventReceipt {
+  eventId     String                   @id @db.Uuid
+  status      IntegrationReceiptStatus @default(PENDING)
+  reason      String?
+  processedAt DateTime?
+  updatedAt   DateTime                 @updatedAt
+  event       IntegrationEvent         @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([status, updatedAt])
+}
+
+model FinancialEntry {
+  id                    String             @id @default(uuid()) @db.Uuid
+  intentId              String             @db.Uuid
+  integrationEventId    String             @db.Uuid
+  entryType             FinancialEntryType
+  provider              String
+  externalTransactionId String
+  businessNo            String             @unique
+  amountFen             Int
+  currency              String             @default("CNY")
+  occurredAt            DateTime
+  createdAt             DateTime           @default(now())
+  intent                PaymentIntent      @relation(fields: [intentId], references: [id], onDelete: Restrict)
+  integrationEvent      IntegrationEvent   @relation(fields: [integrationEventId], references: [id], onDelete: Restrict)
+
+  @@unique([intentId, entryType])
+  @@unique([provider, externalTransactionId, entryType])
+}
+
+model Shipment {
+  id             String          @id @default(uuid()) @db.Uuid
+  orderId        String          @db.Uuid
+  side           OrderSide
+  carrier        String
+  trackingNumber String
+  businessNo     String          @unique
+  status         ShipmentStatus  @default(REGISTERED)
+  registeredAt   DateTime        @default(now())
+  collectedAt    DateTime?
+  deliveredAt    DateTime?
+  updatedAt      DateTime        @updatedAt
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  events         ShipmentEvent[]
+
+  @@unique([orderId, side])
+  @@unique([carrier, trackingNumber])
+}
+
+model ShipmentEvent {
+  id                 String           @id @default(uuid()) @db.Uuid
+  shipmentId         String           @db.Uuid
+  integrationEventId String           @unique @db.Uuid
+  progress           ShipmentStatus
+  occurredAt         DateTime
+  createdAt          DateTime         @default(now())
+  shipment           Shipment         @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  integrationEvent   IntegrationEvent @relation(fields: [integrationEventId], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId, occurredAt])
+}
+
+model OrderCancellation {
+  id               String                  @id @default(uuid()) @db.Uuid
+  orderId          String                  @db.Uuid
+  requestedBySide  OrderSide
+  reason           String
+  status           OrderCancellationStatus @default(REQUESTED)
+  requestedVersion Int
+  requestedAt      DateTime                @default(now())
+  respondedAt      DateTime?
+  order            Order                   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, requestedAt])
+}
+
+model OutboxCommand {
+  id             String                   @id @default(uuid()) @db.Uuid
+  orderId        String                   @db.Uuid
+  businessNo     String                   @unique
+  kind           IntegrationOperationKind
+  payload        Json
+  status         OutboxStatus             @default(PENDING)
+  attempts       Int                      @default(0)
+  availableAt    DateTime                 @default(now())
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  result         Json?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  order          Order                    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([status, availableAt])
+  @@index([status, leaseExpiresAt])
+}
+
+model SimulatedProviderOperation {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  provider              String
+  businessNo            String                   @unique
+  orderId               String                   @db.Uuid
+  kind                  IntegrationOperationKind
+  payload               Json
+  status                ProviderResultStatus     @default(PENDING)
+  externalTransactionId String?
+  result                Json?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  @@index([orderId])
 }

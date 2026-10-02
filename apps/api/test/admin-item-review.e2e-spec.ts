@@ -46,36 +46,6 @@ describe('operator item review', () => {
   let customerToken: string;
   const originalJwtSecret = process.env.JWT_SECRET;
 
-  async function cleanup(): Promise<void> {
-    const users = await prisma.user.findMany({
-      where: {
-        OR: [
-          { wechatOpenid: { startsWith: fixtureMarker } },
-          { adminCredential: { email: { startsWith: fixtureMarker } } },
-        ],
-      },
-      select: { id: true },
-    });
-    const userIds = users.map(({ id }) => id);
-    if (userIds.length === 0) return;
-    const itemIds = (
-      await prisma.item.findMany({
-        where: { ownerId: { in: userIds } },
-        select: { id: true },
-      })
-    ).map(({ id }) => id);
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { actorId: { in: userIds } },
-          { entityType: 'Item', entityId: { in: itemIds } },
-        ],
-      },
-    });
-    await prisma.item.deleteMany({ where: { id: { in: itemIds } } });
-    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-  }
-
   async function createOperator(role: 'REVIEWER' | 'SUPER_ADMIN' | 'OPERATIONS') {
     return await prisma.user.create({
       data: {
@@ -134,7 +104,6 @@ describe('operator item review', () => {
     configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
-    await cleanup();
 
     const customer = await prisma.user.create({
       data: {
@@ -159,7 +128,6 @@ describe('operator item review', () => {
   });
 
   afterAll(async () => {
-    if (prisma) await cleanup();
     if (app) await app.close();
     if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
     else process.env.JWT_SECRET = originalJwtSecret;

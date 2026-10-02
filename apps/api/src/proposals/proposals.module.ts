@@ -5,6 +5,8 @@ import { ProposalsController } from './proposals.controller.js';
 import { ProposalsService } from './proposals.service.js';
 import { ProposalExpiryScheduler } from './proposal-expiry.scheduler.js';
 import { AdminProposalsController } from './admin-proposals.controller.js';
+import { ClockModule } from '../common/clock.module.js';
+import { ReservationsModule } from '../reservations/reservations.module.js';
 
-@Module({ imports: [AuthModule, AuditModule], controllers: [ProposalsController, AdminProposalsController], providers: [ProposalsService, ProposalExpiryScheduler] })
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ReservationsModule], controllers: [ProposalsController, AdminProposalsController], providers: [ProposalsService, ProposalExpiryScheduler] })
 export class ProposalsModule {}

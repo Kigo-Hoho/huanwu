@@ -33,36 +33,12 @@ describe('proposal creation and participant queries', () => {
   const create = (body: object = input(), key: string = randomUUID(), auth = tokens[0]!) => request(app.getHttpServer()).post('/api/proposals').set('Authorization', `Bearer ${auth}`).set('Idempotency-Key', key).send(body);
   const get = (path: string, auth = tokens[0]!) => request(app.getHttpServer()).get(path).set('Authorization', `Bearer ${auth}`);
 
-  async function cleanup() {
-    const ids = (await prisma.user.findMany({ where: { OR: [{ wechatOpenid: { startsWith: prefix } }, { adminCredential: { email: `${prefix}@example.test` } }] } })).map(user => user.id);
-    if (!ids.length) return;
-    await prisma.$transaction(async tx => {
-      await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" DISABLE TRIGGER "ProposalVersion_immutable"');
-      await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" DISABLE TRIGGER "ProposalVersionItem_immutable"');
-      try {
-        const proposalIds = (await tx.proposal.findMany({ where: { initiatorId: { in: ids } }, select: { id: true } })).map(proposal => proposal.id);
-        await tx.auditLog.deleteMany({ where: { entityId: { in: proposalIds } } });
-        await tx.itemReservation.deleteMany({ where: { proposal: { initiatorId: { in: ids } } } });
-        await tx.proposalVersionItem.deleteMany({ where: { proposalVersion: { proposal: { initiatorId: { in: ids } } } } });
-        await tx.proposalVersion.deleteMany({ where: { proposal: { initiatorId: { in: ids } } } });
-        await tx.proposal.deleteMany({ where: { initiatorId: { in: ids } } });
-        await tx.auditLog.deleteMany({ where: { actorId: { in: ids } } });
-        await tx.item.deleteMany({ where: { ownerId: { in: ids } } });
-        await tx.user.deleteMany({ where: { id: { in: ids } } });
-      } finally {
-        await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" ENABLE TRIGGER "ProposalVersionItem_immutable"');
-        await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" ENABLE TRIGGER "ProposalVersion_immutable"');
-      }
-    });
-  }
-
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication();
     configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
-    await cleanup();
     users = [];
     for (const name of ['initiator', 'recipient', 'outsider']) {
       users.push((await prisma.user.create({ data: { wechatOpenid: `${prefix}-${name}`, roles: { create: { role: 'CUSTOMER' } } } })).id);
@@ -78,7 +54,7 @@ describe('proposal creation and participant queries', () => {
     target = await makeItem(users[1]!);
     hidden = await makeItem(users[0]!, 'DRAFT');
   });
-  afterAll(async () => { if (prisma) await cleanup(); if (app) await app.close(); });
+  afterAll(async () => { if (app) await app.close(); });
   afterEach(async () => { await prisma.itemReservation.deleteMany({ where: { proposal: { initiatorId: users[0] } } }); });
 
   const command = (id: string, action: string, body: object, actor = 1, key: string = randomUUID()) =>
