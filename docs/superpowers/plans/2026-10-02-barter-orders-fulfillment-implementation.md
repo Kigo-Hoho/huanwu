@@ -125,6 +125,8 @@ await expect(insertReservationWithTwoOwners()).rejects.toThrow(/check constraint
 - [ ] **Step 4: GREEN。** 在临时 PostgreSQL 库运行迁移和上述测试、旧 proposals／public-items 测试及 typecheck。新数据库配置仅包含 `test/phase3/**/*.e2e-spec.ts`，原配置排除这一目录；API `test` 顺序运行原配置和 phase3 配置，lint／tsconfig 显式包含新配置文件。global setup 创建已迁移的临时模板，旧 API 配置的模板另执行原种子；每个新旧集成测试文件克隆独立数据库，纯单元测试不分配数据库。旧配置 setupFiles 在测试模块求值前设置 DATABASE_URL，覆盖顶层 Prisma 构造；保留文件并行、禁止同文件并发，以逆序 afterAll 在文件 app／client 关闭后清理并恢复环境。删除旧文件边界的审计／报价／用户清理和 DISABLE TRIGGER 绕过，文件内原测试断言、业务性 fixture 操作保持。所有名字必须符合 `barter_p3_<本次随机命名空间>_*`、小于 PostgreSQL 标识长度；退出关闭连接后只删除自己创建的数据库，绝不删除 DATABASE_URL 原库。失败保留清理错误，不强删无关数据。
 
 **Task 2 范围澄清（2026-10-02）：** 规格要求审计历史数据库不可变，但前两次迁移缺少 AuditLog 保护，旧测试通过删除审计和临时禁用报价保护清理共享数据库。执行控制器确认以新增迁移补齐保护，并最小扩展旧集成测试隔离，按文件丢弃本次拥有的临时库；不修改旧迁移、关闭保护或通过串行化隐藏冲突。
+
+**Task 2 审查修正 I1（2026-10-03）：** 原 API 配置拆为 Vitest 内联 unit／integration projects，共享既有 forks、隔离与文件并行配置；只有 integration project 注册模板 globalSetup 和文件 setupFiles，由 Vitest 原生测试选择决定初始化，禁止解析 CLI 文件名猜测。增加子进程回归，移除 DATABASE_URL 及全部 PHASE3_* 后分别运行 reservation-policy／order-policy，确保纯单元选择既不克隆数据库也不初始化模板；保持旧 API 并行集成及 phase3 持久化／升级覆盖。
 - [ ] **Step 5: 审查并提交。** `feat: persist orders and unify item reservations`。记录升级证据；数据库未可用时不得声称任务完成。
 
 ## Task 3: 原子建单、订单查询与用户命令边界
