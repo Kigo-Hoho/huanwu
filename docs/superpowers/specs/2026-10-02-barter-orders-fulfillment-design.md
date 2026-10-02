@@ -123,6 +123,8 @@ ON_HOLD 保存 holdReason、前序阶段、触发时间及尚未完成的义务�
 
 面交不收集快递地址，本阶段不额外开发地图、定位、聊天或约见系统。
 
+任务 4 实施细化：独立地址 GET 必须显式选择 `side=self|outgoing`。自己的资料按参与权限读取；去件地址仅在 AWAITING_FULFILLMENT、IN_TRANSIT、AWAITING_ACCEPTANCE，双方持久化 fundsReady 均为 true、目标地址已冻结且无 REQUESTED 取消时开放。CANCEL_PENDING、CANCELLED、ON_HOLD、SETTLING、COMPLETED 均不开放去件地址；自己保存的历史资料仍可读。授权、资料读取和对方资料访问审计使用同一 RepeatableRead 事务；资料版本变更及双方冻结仅审计 side／version 元数据，通用命令响应仍为脱敏订单摘要。缺失密钥、不可识别 keyVersion 或认证失败明确 503，无明文回退；订单摘要和前两阶段启动无需解密能力。
+
 ## 支付义务、可信事件与外部副作用
 
 订单为双方各建立一份保证金付款义务；非零差价只为确认方案中指定付款方建立一份差价义务，受益人从订单另一方推导。客户端不提交金额、币种、付款身份或收款人，服务端从不可变快照计算。零差价不创建零金额支付单。本阶段服务费为零，不创建服务费付款。

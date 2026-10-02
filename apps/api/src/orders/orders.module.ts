@@ -7,5 +7,7 @@ import { ReservationsModule } from '../reservations/reservations.module.js';
 import { OrderCommandsService } from './order-commands.service.js';
 import { OrdersController } from './orders.controller.js';
 import { OrdersService } from './orders.service.js';
-@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService], exports: [OrdersService, OrderCommandsService] })
+import { AddressCipher } from './address-cipher.js';
+import { OrderAddressService } from './order-address.service.js';
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService], exports: [OrdersService, OrderCommandsService, OrderAddressService] })
 export class OrdersModule {}
