@@ -1,0 +1,45 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://barter:barter_ci_password@127.0.0.1:5432/barter
+      JWT_SECRET: ci-only-jwt-secret-placeholder-32-characters
+      ADMIN_SEED_PASSWORD: ci-only-reviewer-password
+      E2E_REVIEWER_PASSWORD: ci-only-reviewer-password
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: barter
+          POSTGRES_USER: barter
+          POSTGRES_PASSWORD: barter_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U barter -d barter"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:migrate
+      - run: npm run db:seed
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run e2e

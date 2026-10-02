@@ -1,0 +1,17 @@
+name: barter
+
+services:
+  postgres:
+    container_name: barter-postgres
+    image: postgres:17
+    environment:
+      POSTGRES_DB: barter
+      POSTGRES_USER: barter
+      POSTGRES_PASSWORD: barter_local_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U barter"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
