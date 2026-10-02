@@ -9,9 +9,10 @@ import { HealthController } from './health/health.controller.js';
 import { ItemsModule } from './items/items.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { ProposalsModule } from './proposals/proposals.module.js';
+import { OrdersModule } from './orders/orders.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule],
   controllers: [HealthController],
   providers: [
     {

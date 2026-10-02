@@ -131,6 +131,8 @@ await expect(insertReservationWithTwoOwners()).rejects.toThrow(/check constraint
 
 ## Task 3: 原子建单、订单查询与用户命令边界
 
+**任务 3 实施细化（2026-10-03，controller 确认）：** 共享身份重读时，当前持久化角色同时含 CUSTOMER 与任一运营角色的有效已签发会话返回 403；无效、过期、禁用及身份丢失仍 401，令牌校验不变。测试规则尚无生产接入审批，新生产转换在参与权限／幂等重放之后返回 503 INTEGRATION_UNAVAILABLE；simulated 仅 development/test 可创建，disabled 不假称真实资金成功。新增 `orders/order-reader.ts` 保留 orderInclude／LockedOrder 固定接口，以同事务顺序批量读取五类订单关系，避免 Prisma7 的关系 query 策略触发 pg8 重叠查询弃用警告；不改变依赖、生成器或全局适配器。
+
 **Files:** Create `auth/customer-only.guard.ts`；Create orders 的 mapper／commands／service／controller／module、`proposals/proposal-order-handoff.service.ts`；Modify AppModule、ProposalsModule、proposal mapper；Create `test/phase3/support/order-harness.ts`、`order-conversion.e2e-spec.ts`、`orders-query.e2e-spec.ts`。
 
 **Interfaces:** `ProposalOrderHandoffService.prepare(tx,actorId,proposalId,expectedVersion,now):Promise<ConfirmedOffer>`、`markConverted(tx,proposalId,orderId):Promise<void>`，ConfirmedOffer 含来源、参与人、完整现版和 itemIds。`OrdersService.convert(actor:AuthenticatedUser,id,input:OrderCommandInput,key,requestId?):Promise<OrderCommandResult>`、`detail(actor,id):Promise<OrderView>`、`list(actor,{cursor?,status?,limit?}):Promise<OrderListView>`。`OrderCommandsService.execute(context:OrderCommandContext,mutate:OrderMutation):Promise<OrderCommandResult>`，context 包含 actor／id／input／key／commandName／requestId；mutation `(tx,order:LockedOrder,now)=>Promise<{auditAction:string,paymentIntentId?:string}>`；框架统一修订、脱敏审计和响应。`orderInclude`、`mapOrder(order):OrderView`。

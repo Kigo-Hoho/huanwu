@@ -180,6 +180,9 @@ export class AuthService {
     }
 
     const storedRoles = user.roles.map(({ role }) => role as Role);
+    if (storedRoles.includes('CUSTOMER') && storedRoles.some(role => operatorRoles.includes(role))) {
+      throw new ForbiddenException('Customer and operator roles cannot share a session');
+    }
     if (principal.type === 'CUSTOMER') {
       if (
         user.wechatOpenid === null ||

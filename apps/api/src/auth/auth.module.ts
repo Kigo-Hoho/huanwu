@@ -6,6 +6,7 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { RolesGuard } from './roles.guard.js';
+import { CustomerOnlyGuard } from './customer-only.guard.js';
 import {
   CUSTOMER_IDENTITY_PROVIDER,
   WechatIdentityProvider,
@@ -19,6 +20,7 @@ import {
     AuthService,
     JwtAuthGuard,
     RolesGuard,
+    CustomerOnlyGuard,
     WechatIdentityProvider,
     AcceptanceIdentityProvider,
     {
@@ -42,6 +44,6 @@ import {
       },
     },
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtAuthGuard, RolesGuard, CustomerOnlyGuard],
 })
 export class AuthModule {}
