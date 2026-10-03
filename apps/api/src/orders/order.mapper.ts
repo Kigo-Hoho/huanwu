@@ -6,7 +6,7 @@ export const orderInclude = {
   parties: { orderBy: { side: 'asc' } },
   payments: { select: { id: true, orderId: true, side: true, purpose: true, amountFen: true, currency: true, status: true }, orderBy: { purpose: 'asc' } },
   shipments: true,
-  cancellations: { orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }], take: 1 },
+  cancellations: { orderBy: [{ requestedAt: 'desc' }, { requestedVersion: 'desc' }, { id: 'desc' }], take: 1 },
 } satisfies Prisma.OrderInclude;
 export type OrderTx = Prisma.TransactionClient;
 export type LockedOrder = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;

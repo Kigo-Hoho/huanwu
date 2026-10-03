@@ -9,5 +9,7 @@ import { OrdersController } from './orders.controller.js';
 import { OrdersService } from './orders.service.js';
 import { AddressCipher } from './address-cipher.js';
 import { OrderAddressService } from './order-address.service.js';
-@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService], exports: [OrdersService, OrderCommandsService, OrderAddressService] })
+import { IntegrationsModule } from '../integrations/integrations.module.js';
+import { OrderCancellationService } from './order-cancellation.service.js';
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService], exports: [OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService] })
 export class OrdersModule {}

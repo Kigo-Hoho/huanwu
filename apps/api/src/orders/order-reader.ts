@@ -1,4 +1,4 @@
-import type { Order } from '../generated/prisma/client.js';
+import { Prisma, type Order, type OrderCancellation } from '../generated/prisma/client.js';
 import { orderInclude, type LockedOrder, type OrderTx } from './order.mapper.js';
 
 // Prisma's application-level relation strategy dispatches sibling queries on the
@@ -11,7 +11,13 @@ export async function readOrderRelations(tx: OrderTx, orders: Order[]): Promise<
   const parties = await tx.orderPartyProgress.findMany({ where, ...orderInclude.parties });
   const payments = await tx.paymentIntent.findMany({ where, ...orderInclude.payments });
   const shipments = await tx.shipment.findMany({ where });
-  const cancellations = await tx.orderCancellation.findMany({ where, orderBy: orderInclude.cancellations.orderBy });
+  // Bound history at the database to one latest request per order. The revision
+  // breaks equal timestamps deterministically even when commands share a clock tick.
+  const cancellations = await tx.$queryRaw<OrderCancellation[]>(Prisma.sql`
+    SELECT DISTINCT ON ("orderId") * FROM "OrderCancellation"
+    WHERE "orderId" IN (${Prisma.join(orders.map(order => Prisma.sql`${order.id}::uuid`))})
+    ORDER BY "orderId", "requestedAt" DESC, "requestedVersion" DESC, "id" DESC
+  `);
   return orders.map(order => ({
     ...order, items: items.filter(item => item.orderId === order.id),
     parties: parties.filter(party => party.orderId === order.id),
