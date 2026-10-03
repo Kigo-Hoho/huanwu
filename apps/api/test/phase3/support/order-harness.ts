@@ -10,6 +10,7 @@ import { CLOCK, type Clock } from '../../../src/common/clock.js';
 import { PrismaService } from '../../../src/database/prisma.service.js';
 import { configureApp } from '../../../src/main.js';
 import { ProposalExpiryScheduler } from '../../../src/proposals/proposal-expiry.scheduler.js';
+import { OutboxWorker } from '../../../src/integrations/outbox.worker.js';
 import { createPhase3Database } from './database-fixtures.js';
 
 export class MutableClock implements Clock {
@@ -23,6 +24,7 @@ export async function createOrderHarness() {
   const clock = new MutableClock();
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(CLOCK).useValue(clock)
+    .overrideProvider(OutboxWorker).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
   const app = module.createNestApplication();
   configureApp(app); await app.init();

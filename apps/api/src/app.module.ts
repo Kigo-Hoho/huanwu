@@ -10,9 +10,10 @@ import { ItemsModule } from './items/items.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { ProposalsModule } from './proposals/proposals.module.js';
 import { OrdersModule } from './orders/orders.module.js';
+import { IntegrationsModule } from './integrations/integrations.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule],
   controllers: [HealthController],
   providers: [
     {
