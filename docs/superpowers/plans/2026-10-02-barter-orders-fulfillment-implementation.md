@@ -259,11 +259,15 @@ expect(await incomingDeadlineMinusDelivered()).toBe(72 * 60 * 60 * 1000);
 
 ## Task 9: 双方验收、异常锁定与最终结算
 
-**Files:** Create `orders/order-acceptance.service.ts`，payments settlement.service.ts；Reuse／extend 任务8提前建立的 `orders/order-hold.service.ts`，整合现有私有资金异常 hold；Modify order／testing controllers、payment events／handler；Create `test/phase3/order-settlement.e2e-spec.ts`、`order-issues.e2e-spec.ts`。
+**Files:** Create `orders/order-acceptance.service.ts`、`orders/order-acceptance.controller.ts`、`payments/settlement.service.ts`；Reuse 任务8提前建立的 `orders/order-hold.service.ts`，整合现有私有资金异常 hold；Modify PaymentsModule、payment events／handler 及既有未实现路由测试；Create `test/phase3/order-settlement.e2e-spec.ts`、`order-issues.e2e-spec.ts`。验收服务／控制器由 PaymentsModule 与 SettlementService 一起注册，单向消费 OrdersModule 的公开命令／hold 服务，不引入 OrdersModule 反向依赖。已有模拟 worker 自动确认正常返还／结算，无需新增可任意提交资金结果的测试路由。
 
 **Interfaces:** `OrderAcceptanceService.accept(actor,id,input,key):Promise<OrderCommandResult>`、`issue(actor,id,input,key):Promise<OrderCommandResult>`；`OrderHoldService.enter(tx,order,reason,now):Promise<void>`；`SettlementService.begin(tx,order,now):Promise<void>`、`tryFinalize(tx,orderId,now):Promise<boolean>`。完成返回与修订通过同一 mapOrder。
 
 OrderHoldService 的 supplied tx 契约：调用者已按订单→排序物品／占用→相关资金行顺序持锁、重读完整 LockedOrder 并提供锁后 CLOCK；enter 只写 hold 状态与 ORDER_HELD 审计，不增 revision、不释放占用、不恢复 ON_HOLD／COMPLETED／CANCELLED，调用者为自身转换增一次 revision。已有资金 admission keys 必须保留。
+
+SettlementService.begin 使用 supplied tx，锁订单的调用者拥有一次用户修订，helper 重新按排序物品／占用→资金加锁和读取 CLOCK，写 SETTLING 审计与稳定 `refund:${intent.id}`／`settle:${intent.id}` 任务，不另增 revision。tryFinalize 同事务重读并使用锁后 CLOCK；只有全部原义务可信处置、完整占用及原所有者匹配才完成，一次终态 revision 与物品 INACTIVE／version+1／释放／审计原子提交；false 不修改状态。资金 admission history 不能代替未完成义务判定。
+
+任务9全量验证补充：既有 persistence 独立服务测试先显式 `$connect()` 和无副作用 `SELECT 1`，再执行原业务事务／断言，并沿用 finally 断开。两次正常全量运行暴露其首次冷连接进入 transaction-start 时限，单文件诊断通过；`$connect()` 初始化引擎／连接池，不保证已建立物理连接，因此健康查询属于测试准备。不得通过修改生产代码、超时、并发或跳过测试掩盖该问题。
 
 - [ ] **Step 1: 写失败测试。** 自己来件未到／已逾期拒绝，不能代对方；双方验收才SETTLING；零差价无结算任务；部分／UNKNOWN不能完成、重复保证金返还不重复；异议锁定与验收／worker竞争；审计失败回滚最终下架与释放。
 

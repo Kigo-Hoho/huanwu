@@ -25,7 +25,7 @@ export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModu
     @Inject(OrderCancellationService) private readonly cancellation: OrderCancellationService,
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
   ) {}
-  onModuleInit(): void { for (const kind of ['CREATE_PAYMENT', 'CLOSE_PAYMENT', 'REFUND_PAYMENT'] as const) this.registry.register(kind, this); }
+  onModuleInit(): void { for (const kind of ['CREATE_PAYMENT', 'CLOSE_PAYMENT', 'REFUND_PAYMENT', 'SETTLE_DIFFERENCE'] as const) this.registry.register(kind, this); }
   async authorize(operation: ProviderOperation): Promise<boolean> {
     if (this.config.payment === 'disabled') return false;
     return this.prisma.$transaction(async tx => {
@@ -40,12 +40,17 @@ export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModu
       if (operation.kind === 'CREATE_PAYMENT') {
         if (order.status !== 'AWAITING_PAYMENT' || !['CREATED', 'PENDING'].includes(intent.status) || !order.paymentDeadline || this.clock.now() >= order.paymentDeadline) return false;
       } else {
-        if (order.status !== 'CANCEL_PENDING') return false;
-        const kind = operation.kind === 'CLOSE_PAYMENT' ? 'close' : operation.kind === 'REFUND_PAYMENT' ? 'refund' : null;
+        const kind = operation.kind === 'CLOSE_PAYMENT' ? 'close' : operation.kind === 'REFUND_PAYMENT' ? 'refund' : operation.kind === 'SETTLE_DIFFERENCE' ? 'settle' : null;
         if (!kind || operation.businessNo !== `${kind}:${intent.id}`) return false;
+        if (order.status === 'SETTLING') {
+          if (kind === 'close' || (kind === 'refund' && intent.purpose !== 'DEPOSIT') || (kind === 'settle' && (intent.purpose !== 'DIFFERENCE' || !order.differenceFen || intent.side !== order.payer || intent.amountFen !== order.differenceFen))) return false;
+          if (await tx.orderCancellation.count({ where: { orderId: order.id, status: 'REQUESTED' } })) return false;
+          const parties = await tx.orderPartyProgress.findMany({ where: { orderId: order.id } });
+          if (parties.length !== 2 || parties.some(p => !p.incomingDeliveredAt || !p.acceptedAt)) return false;
+        } else if (order.status !== 'CANCEL_PENDING' || kind === 'settle') return false;
         const ledger = await tx.financialEntry.findMany({ where: { intentId: intent.id } });
         if (kind === 'close' && (ledger.length || ['PAID', 'REFUNDED', 'CLOSED'].includes(intent.status))) return false;
-        if (kind === 'refund' && (intent.status !== 'PAID' || !ledger.some(entry => entry.entryType === 'PAYMENT') || ledger.some(entry => entry.entryType !== 'PAYMENT'))) return false;
+        if (kind !== 'close' && (intent.status !== 'PAID' || !ledger.some(entry => entry.entryType === 'PAYMENT' && entry.amountFen === intent.amountFen && entry.currency === 'CNY') || ledger.some(entry => entry.entryType !== 'PAYMENT'))) return false;
         const previous = order.outstandingObligations as Prisma.JsonObject | null;
         const admitted = Array.isArray(previous?.financialOperations) ? previous.financialOperations as string[] : [];
         if (!admitted.includes(operation.businessNo)) {
@@ -62,7 +67,7 @@ export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModu
     });
   }
   async query(operation: ProviderOperation): Promise<ProviderResult> {
-    const result = await (operation.kind === 'REFUND_PAYMENT' ? this.port.queryRefund(operation.businessNo) : this.port.queryPayment(operation.businessNo));
+    const result = await (operation.kind === 'REFUND_PAYMENT' ? this.port.queryRefund(operation.businessNo) : operation.kind === 'SETTLE_DIFFERENCE' ? this.port.querySettlement(operation.businessNo) : this.port.queryPayment(operation.businessNo));
     if (operation.kind !== 'CLOSE_PAYMENT' || result.status !== 'FAILURE' || result.reason !== 'NOT_FOUND') return result;
     const originalNo = operation.payload.paymentBusinessNo;
     if (typeof originalNo !== 'string') return { status: 'UNKNOWN', reason: 'ORIGINAL_PAYMENT_UNRESOLVED' };
@@ -79,11 +84,12 @@ export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModu
   execute(operation: ProviderOperation): Promise<ProviderResult> {
     if (operation.kind === 'CREATE_PAYMENT') return this.port.createPayment(operation);
     if (operation.kind === 'CLOSE_PAYMENT') return this.port.closePayment(operation);
+    if (operation.kind === 'SETTLE_DIFFERENCE') return this.port.settleDifference(operation);
     return this.port.refundPayment(operation);
   }
   async apply(operation: ProviderOperation, result: ProviderResult): Promise<void> {
     if (result.status === 'SUCCESS') {
-      const expectedKind = operation.kind === 'CREATE_PAYMENT' ? 'PAYMENT_SUCCEEDED' : operation.kind === 'CLOSE_PAYMENT' ? 'PAYMENT_CLOSED' : 'REFUND_SUCCEEDED';
+      const expectedKind = operation.kind === 'CREATE_PAYMENT' ? 'PAYMENT_SUCCEEDED' : operation.kind === 'CLOSE_PAYMENT' ? 'PAYMENT_CLOSED' : operation.kind === 'SETTLE_DIFFERENCE' ? 'DIFFERENCE_SETTLED' : 'REFUND_SUCCEEDED';
       if (result.event.kind === 'SHIPMENT_PROGRESS' || result.event.businessNo !== operation.businessNo || result.event.kind !== expectedKind || result.externalTransactionId !== result.event.externalTransactionId) throw new Error('Provider result does not match the queried financial operation');
       await this.events.applyVerified(result.event);
     }

@@ -9,6 +9,8 @@ import { OutboxService } from '../integrations/outbox.service.js';
 import { OrderCancellationService } from '../orders/order-cancellation.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { ReservationsService } from '../reservations/reservations.service.js';
+import { OrderHoldService } from '../orders/order-hold.service.js';
+import { SettlementService } from './settlement.service.js';
 
 @Injectable()
 export class PaymentEventsService {
@@ -19,6 +21,8 @@ export class PaymentEventsService {
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
     @Inject(OrderCancellationService) private readonly cancellation: OrderCancellationService,
     @Inject(OutboxService) private readonly outbox: OutboxService,
+    @Inject(OrderHoldService) private readonly hold: OrderHoldService,
+    @Inject(SettlementService) private readonly settlement: SettlementService,
   ) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
     if (event.kind === 'SHIPMENT_PROGRESS') throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a financial event' });
@@ -49,19 +53,20 @@ export class PaymentEventsService {
       const reject = async (reason: string, hold = false) => {
         await receipt('REJECTED', reason);
         if (hold && association) {
-          const current = await tx.order.findUniqueOrThrow({ where: { id: association.orderId } });
+          const current = (await readOrder(tx, association.orderId))!;
           if (!['CANCELLED', 'COMPLETED', 'ON_HOLD'].includes(current.status)) {
-            await tx.order.update({ where: { id: current.id }, data: { status: 'ON_HOLD', holdReason: reason, holdPreviousStatus: current.status, heldAt: now, version: { increment: 1 } } });
-            await this.audit.record(tx, { actorId: null, action: 'ORDER_FINANCIAL_ANOMALY', entityType: 'Order', entityId: current.id, after: { reason, eventId: recorded.id } });
+            await this.hold.enter(tx, current, reason, now);
+            await tx.order.update({ where: { id: current.id }, data: { version: { increment: 1 } } });
           }
+          await this.audit.record(tx, { actorId: null, action: 'ORDER_FINANCIAL_ANOMALY', entityType: 'Order', entityId: current.id, after: { reason, eventId: recorded.id } });
         }
         await this.audit.record(tx, { actorId: null, action: 'PAYMENT_EVENT_QUARANTINED', entityType: 'IntegrationEvent', entityId: recorded.id, after: { reason } });
       };
       if (!association) { await reject('UNKNOWN_BUSINESS_NUMBER'); return; }
       const intent = await tx.paymentIntent.findUniqueOrThrow({ where: { id: association.id } });
-      const expectedEffect = event.kind === 'PAYMENT_CLOSED' ? 'CLOSE_PAYMENT' : event.kind === 'REFUND_SUCCEEDED' ? 'REFUND_PAYMENT' : null;
+      const expectedEffect = event.kind === 'PAYMENT_CLOSED' ? 'CLOSE_PAYMENT' : event.kind === 'REFUND_SUCCEEDED' ? 'REFUND_PAYMENT' : event.kind === 'DIFFERENCE_SETTLED' ? 'SETTLE_DIFFERENCE' : null;
       if (event.provider !== intent.provider || event.currency !== 'CNY' || event.amountFen !== intent.amountFen ||
-        (event.kind !== 'PAYMENT_SUCCEEDED' && (!effect || !expectedEffect || effect.kind !== expectedEffect || effect.orderId !== intent.orderId || effect.businessNo !== `${event.kind === 'PAYMENT_CLOSED' ? 'close' : 'refund'}:${intent.id}` || (effect.payload as Prisma.JsonObject).amountFen !== intent.amountFen || (effect.payload as Prisma.JsonObject).currency !== 'CNY'))) { await reject('OBLIGATION_MISMATCH'); return; }
+        (event.kind !== 'PAYMENT_SUCCEEDED' && (!effect || !expectedEffect || effect.kind !== expectedEffect || effect.orderId !== intent.orderId || effect.businessNo !== `${event.kind === 'PAYMENT_CLOSED' ? 'close' : event.kind === 'REFUND_SUCCEEDED' ? 'refund' : 'settle'}:${intent.id}` || (effect.payload as Prisma.JsonObject).amountFen !== intent.amountFen || (effect.payload as Prisma.JsonObject).currency !== 'CNY'))) { await reject('OBLIGATION_MISMATCH'); return; }
       let order = (await readOrder(tx, intent.orderId))!;
       const ledger = await tx.financialEntry.findMany({ where: { intentId: intent.id } });
       if (event.kind === 'PAYMENT_CLOSED') {
@@ -74,35 +79,38 @@ export class PaymentEventsService {
         await this.audit.record(tx, { actorId: null, action: 'ORDER_PAYMENT_CLOSED', entityType: 'PaymentIntent', entityId: intent.id, after: { eventId: recorded.id } });
         return;
       }
-      const entryType = event.kind === 'PAYMENT_SUCCEEDED' ? 'PAYMENT' : 'REFUND';
-      if (entryType === 'REFUND' && !ledger.some(entry => entry.entryType === 'PAYMENT')) {
+      const entryType = event.kind === 'PAYMENT_SUCCEEDED' ? 'PAYMENT' : event.kind === 'REFUND_SUCCEEDED' ? 'REFUND' : 'DIFFERENCE_SETTLEMENT';
+      if (entryType === 'DIFFERENCE_SETTLEMENT' && (intent.purpose !== 'DIFFERENCE' || intent.side !== order.payer || intent.amountFen !== order.differenceFen)) { await reject('OBLIGATION_MISMATCH'); return; }
+      if (entryType !== 'PAYMENT' && !ledger.some(entry => entry.entryType === 'PAYMENT')) {
         await receipt('PENDING', 'PAYMENT_NOT_RECORDED');
         await this.audit.record(tx, { actorId: null, action: 'PAYMENT_EVENT_DEFERRED', entityType: 'IntegrationEvent', entityId: recorded.id, after: { reason: 'PAYMENT_NOT_RECORDED' } });
         return;
       }
-      if (entryType === 'REFUND' && ledger.some(entry => entry.entryType === 'DIFFERENCE_SETTLEMENT')) { await reject('REFUND_CONTRADICTS_SETTLEMENT'); return; }
+      if (entryType === 'REFUND' && ledger.some(entry => entry.entryType === 'DIFFERENCE_SETTLEMENT')) { await reject('REFUND_CONTRADICTS_SETTLEMENT', true); return; }
+      if (entryType === 'DIFFERENCE_SETTLEMENT' && ledger.some(entry => entry.entryType === 'REFUND')) { await reject('SETTLEMENT_CONTRADICTS_REFUND', true); return; }
       const previous = await tx.financialEntry.findFirst({ where: { OR: [{ intentId: intent.id, entryType }, { provider: event.provider, externalTransactionId: event.externalTransactionId, entryType }] } });
       if (previous) {
-        if (previous.intentId !== intent.id || previous.externalTransactionId !== event.externalTransactionId) await reject('TRANSACTION_CONFLICT');
+        if (previous.intentId !== intent.id || previous.externalTransactionId !== event.externalTransactionId) await reject('TRANSACTION_CONFLICT', true);
         else {
           await receipt('PROCESSED');
           await this.audit.record(tx, { actorId: null, action: 'PAYMENT_EVENT_DUPLICATE', entityType: 'IntegrationEvent', entityId: recorded.id });
         }
         return;
       }
+      if (entryType === 'DIFFERENCE_SETTLEMENT' && !['SETTLING', 'ON_HOLD'].includes(order.status)) { await reject('SETTLEMENT_OUTSIDE_AUTHORIZED_STAGE', true); return; }
+      if (entryType === 'REFUND' && order.status === 'SETTLING' && intent.purpose !== 'DEPOSIT') { await reject('REFUND_CONTRADICTS_SETTLEMENT', true); return; }
       await tx.financialEntry.create({ data: { intentId: intent.id, integrationEventId: recorded.id, entryType, provider: event.provider, externalTransactionId: event.externalTransactionId, businessNo: event.businessNo, amountFen: intent.amountFen, currency: 'CNY', occurredAt: new Date(event.occurredAt) } });
-      if (entryType === 'REFUND') {
-        await tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'REFUNDED', refundedAt: new Date(event.occurredAt) } });
+      if (entryType !== 'PAYMENT') {
+        if (entryType === 'REFUND') await tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'REFUNDED', refundedAt: new Date(event.occurredAt) } });
         await receipt('PROCESSED', order.status === 'ON_HOLD' ? 'ORDER_ON_HOLD' : null);
-        const finalized = await this.cancellation.tryFinalize(tx, order.id, now);
+        const finalized = order.status === 'SETTLING' ? await this.settlement.tryFinalize(tx, order.id, now) : await this.cancellation.tryFinalize(tx, order.id, now);
         if (!finalized) await tx.order.update({ where: { id: order.id }, data: { version: { increment: 1 } } });
-        await this.audit.record(tx, { actorId: null, action: 'ORDER_REFUND_CONFIRMED', entityType: 'PaymentIntent', entityId: intent.id, after: { eventId: recorded.id, amountFen: intent.amountFen, currency: 'CNY' } });
+        await this.audit.record(tx, { actorId: null, action: entryType === 'REFUND' ? 'ORDER_REFUND_CONFIRMED' : 'ORDER_DIFFERENCE_SETTLED', entityType: 'PaymentIntent', entityId: intent.id, after: { eventId: recorded.id, amountFen: intent.amountFen, currency: 'CNY', ...(entryType === 'DIFFERENCE_SETTLEMENT' ? { beneficiaryId: order.payer === 'INITIATOR' ? order.recipientId : order.initiatorId } : {}) } });
         return;
       }
       if (intent.closedAt || intent.status === 'CLOSED') {
         await tx.paymentIntent.update({ where: { id: intent.id }, data: { paidAt: new Date(event.occurredAt), externalTransactionId: event.externalTransactionId } });
-        await reject('PAYMENT_AFTER_CLOSED');
-        if (!['CANCELLED', 'COMPLETED', 'ON_HOLD'].includes(order.status)) await tx.order.update({ where: { id: order.id }, data: { status: 'ON_HOLD', holdReason: 'PAYMENT_AFTER_CLOSED', holdPreviousStatus: order.status, heldAt: now, version: { increment: 1 } } });
+        await reject('PAYMENT_AFTER_CLOSED', true);
         await this.audit.record(tx, { actorId: null, action: 'ORDER_PAYMENT_CONFIRMED', entityType: 'PaymentIntent', entityId: intent.id, after: { eventId: recorded.id, amountFen: intent.amountFen, currency: 'CNY', anomaly: 'PAYMENT_AFTER_CLOSED' } });
         return;
       }
@@ -129,7 +137,7 @@ export class PaymentEventsService {
       await this.audit.record(tx, { actorId: null, action: 'ORDER_PAYMENT_CONFIRMED', entityType: 'PaymentIntent', entityId: intent.id, after: { eventId: recorded.id, amountFen: intent.amountFen, currency: 'CNY' } });
     });
     if (event.kind === 'PAYMENT_SUCCEEDED' && association) {
-      const waiting = await this.prisma.integrationEvent.findMany({ where: { businessNo: `refund:${association.id}`, receipt: { status: 'PENDING', reason: 'PAYMENT_NOT_RECORDED' } } });
+      const waiting = await this.prisma.integrationEvent.findMany({ where: { businessNo: { in: [`refund:${association.id}`, `settle:${association.id}`] }, receipt: { status: 'PENDING', reason: 'PAYMENT_NOT_RECORDED' } } });
       for (const pending of waiting) await this.applyVerified(pending.payload as unknown as VerifiedIntegrationEvent);
     }
   }

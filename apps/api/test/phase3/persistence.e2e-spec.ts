@@ -143,6 +143,10 @@ it('hands the exact full lease set to an order in place and never frees it throu
   const publicItems = new PublicItemsService(prisma, clock);
   const offer = { offeredItemIds: [item], targetItemId: second, differenceFen: 0, payer: 'NONE' as const, deliveryMode: 'IN_PERSON' as const, initiatorShippingFen: 0, recipientShippingFen: 0 };
   try {
+    // Standalone service has no Nest lifecycle or harness fixture queries. Warm
+    // its engine and physical connection before testing business transactions.
+    await prisma.$connect();
+    await prisma.$queryRaw`SELECT 1`;
     const competing = await proposals.create(a, offer, 'competing-before-handoff');
     const expiresAt = new Date('2026-10-05T00:00:00Z');
     await prisma.itemReservation.createMany({ data: [item,second].map(itemId => ({ itemId, proposalId: proposal, proposalVersionId: version, expiresAt })) });

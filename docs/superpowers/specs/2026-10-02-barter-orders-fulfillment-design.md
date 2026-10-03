@@ -198,6 +198,12 @@ IN_PERSON 模式不允许填写运单，不调用物流适配器。双方分别�
 
 ### 正常完成
 
+任务9实施细化：OrderAcceptanceController／OrderAcceptanceService 位于 orders 源目录，由 PaymentsModule 与 SettlementService 注册，沿用付款／履约控制器的单向模块组合，不让 OrdersModule 反向导入 PaymentsModule。既定 acceptance／issue 路径及严格 CUSTOMER／expectedVersion／幂等契约不变。自己来件可信收到即可独立验收；验收与异议都在订单→排序物品／占用→资金锁后重读时间，异议仅在自身有效验收期内接受。用户命令各增一次 revision，hold／settlement.begin 不重复递增。
+
+双方验收生成正常保证金返还 `refund:${intent.id}`（与取消完全共享唯一 REFUND 义务）及非零差价 `settle:${intent.id}`；所有 payload 都绑定原 `paymentBusinessNo` 和原金额／CNY。差价受益人由不可变 payer 对侧推导，可信结算审计记录受益人。SettlementService.tryFinalize 只在 SETTLING 且完整原始付款／处置账本、两方有效验收、完整原物品占用／所有者均一致时完成；成功拥有一次终态 revision，false 无业务写入。历史 financialOperations 准入号保留用于追溯，不当作尚未解决的义务；旧阶段期限不阻碍 SETTLING 或终态核对。
+
+正常返还／结算复用现有 worker 和模拟适配器，无新增客户任意资金结果驱动。ON_HOLD 不准发送新的处置，已保存／真正已在途成功仍保存不可变事件、资金账本、receipt 与审计，不自动完成或解锁。DIFFERENCE_SETTLED 与 REFUND_SUCCEEDED 互斥；结算先于付款入账时 receipt=PENDING/PAYMENT_NOT_RECORDED，付款事实提交后重处理相同事件。共同 OrderHoldService 收拢既有私有资金 hold；终态矛盾追加异常 receipt／审计，不改完成历史、物品或新占用。
+
 双方面交／签收成立、各自确认验收且无异议、取消请求或到期期限冲突后，事务内进入 SETTLING、写审计并产生必要 outbox：差价结算给约定受益人及双方保证金返还。零差价无需差价结算任务。
 
 全部必要任务经可信确认后才进入 COMPLETED，同时下架原物品并释放订单占用。任一任务结果未知或失败，显示结算待核对，不显示完成；再次执行复用原外部业务编号，不能重复支付受益人或返还保证金。不可解决的矛盾进入 ON_HOLD，第三阶段运营只读，不替运营默认决定资金去向。
