@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { CheckoutViewSchema, OrderCommandResultSchema, type CheckoutView, type OrderCommandInput, type OrderPaymentInput, type OrderCommandResult } from '@barter/contracts';
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { assertPureCustomer } from '../auth/customer-only.guard.js';
 import { CLOCK, type Clock } from '../common/clock.js';
@@ -86,6 +86,15 @@ export class PaymentsService {
     if ((admission.response as Prisma.JsonObject).status !== 'IN_PROGRESS') return replayOrderCommand(admission, hash);
     let external = await this.adapter.queryPayment(intent.businessNo);
     if (external.status === 'PENDING') {
+      const denied = await this.authorizeFreshCompletion(actor, order.id, intentId);
+      if (denied) {
+        // A logical admission permits recovery, not a new effect after hold/cancel/expiry.
+        // The pending snapshot may meanwhile have become a saved, reconcilable success.
+        external = await this.adapter.queryPayment(intent.businessNo);
+        if (external.status !== 'SUCCESS') throw denied;
+      }
+    }
+    if (external.status === 'PENDING') {
       // All retries and concurrent callers use exactly the same external fact identity.
       const candidate = { provider: 'simulated', eventId: `complete:${intent.id}`, kind: 'PAYMENT_SUCCEEDED', businessNo: intent.businessNo, occurredAt: admission.createdAt.toISOString(), externalTransactionId: `simulated-payment:${intent.id}`, amountFen: intent.amountFen, currency: 'CNY' };
       const raw = JSON.stringify(candidate);
@@ -103,6 +112,23 @@ export class PaymentsService {
       const result = OrderCommandResultSchema.parse({ order: mapOrder(current), paymentIntentId: intentId });
       await tx.idempotencyRecord.update({ where, data: { response: result as unknown as Prisma.InputJsonObject } });
       return result;
+    });
+  }
+  private authorizeFreshCompletion(actor: AuthenticatedUser, orderId: string, intentId: string): Promise<ConflictException | null> {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId}::uuid FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "PaymentIntent" WHERE id = ${intentId}::uuid FOR UPDATE`;
+      const order = await readOrder(tx, orderId);
+      const intent = await tx.paymentIntent.findUniqueOrThrow({ where: { id: intentId } });
+      const user = await tx.user.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, wechatOpenid: true, roles: { select: { role: true } }, adminCredential: { select: { userId: true } } } });
+      if (!user || user.disabledAt !== null) throw new UnauthorizedException('Account is unavailable');
+      assertPureCustomer({ id: user.id, roles: user.roles.map(({ role }) => role) });
+      if (user.wechatOpenid === null || user.adminCredential !== null) throw new UnauthorizedException('Customer identity is unavailable');
+      assertOrderParticipant(order, actor.id);
+      if (intent.orderId !== order.id || (intent.side === 'INITIATOR' ? order.initiatorId : order.recipientId) !== actor.id) throw new ForbiddenException();
+      if (order.status !== 'AWAITING_PAYMENT' || intent.status !== 'PENDING') return new ConflictException({ code: 'ORDER_PAYMENT_NOT_READY', message: 'Payment checkout is not ready' });
+      if (!order.paymentDeadline || this.clock.now() >= order.paymentDeadline) return new ConflictException({ code: 'ORDER_EXPIRED', message: 'Payment deadline has passed' });
+      return null;
     });
   }
 }

@@ -342,3 +342,107 @@ it('rechecks persisted customer authorization before replaying a successful simu
   finally { await h.prisma.userRole.deleteMany({ where: { userId: h.actors.initiator.id, role: 'OPERATIONS' } }); }
   expect(await h.prisma.financialEntry.count({ where: { intentId: first, entryType: 'PAYMENT' } })).toBe(1);
 });
+it.each(['ON_HOLD', 'CANCEL_PENDING', 'EXPIRED'] as const)('does not create a fresh payment on an admitted pre-effect retry after %s', async restriction => {
+  const { order, first } = await pendingPair(); const key = randomUUID();
+  const current = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  const intent = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: first } });
+  vi.spyOn(h.app.get(SimulatedPaymentAdapter), 'queryPayment').mockRejectedValueOnce(new Error('Injected query failure before external completion'));
+  await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }, key).expect(500);
+  expect(await h.app.get(SimulatedProviderStore).successCount(intent.businessNo)).toBe(0);
+  expect((await h.prisma.idempotencyRecord.findFirstOrThrow({ where: { key } })).response).toMatchObject({ status: 'IN_PROGRESS' });
+  const now = h.clock.now();
+  if (restriction === 'CANCEL_PENDING') await cancel(order.id);
+  else if (restriction === 'ON_HOLD') await h.prisma.order.update({ where: { id: order.id }, data: { status: 'ON_HOLD', holdReason: 'TEST_HOLD', holdPreviousStatus: 'AWAITING_PAYMENT', heldAt: now } });
+  else h.clock.set(order.paymentDeadline);
+  try {
+    await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }, key).expect(409);
+    expect(await h.app.get(SimulatedProviderStore).successCount(intent.businessNo)).toBe(0);
+    expect(await h.prisma.financialEntry.count({ where: { intentId: first, entryType: 'PAYMENT' } })).toBe(0);
+    expect(await h.prisma.integrationEvent.count({ where: { businessNo: intent.businessNo, kind: 'PAYMENT_SUCCEEDED' } })).toBe(0);
+  } finally { h.clock.set(now); }
+});
+it.each(['ON_HOLD', 'CANCEL_PENDING'] as const)('preserves a genuinely in-flight completion that was dispatched before %s', async restriction => {
+  const { order, first } = await pendingPair(); const key = randomUUID();
+  const current = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  const store = h.app.get(SimulatedProviderStore); const record = store.recordEvent.bind(store);
+  let entered!: () => void; let resume!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; }); const release = new Promise<void>(resolve => { resume = resolve; });
+  vi.spyOn(store, 'recordEvent').mockImplementationOnce(async event => { entered(); await release; await record(event); });
+  const completion = h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }, key).then(response => response);
+  await waiting;
+  try {
+    if (restriction === 'CANCEL_PENDING') await cancel(order.id);
+    else await h.prisma.order.update({ where: { id: order.id }, data: { status: 'ON_HOLD', holdReason: 'TEST_HOLD', holdPreviousStatus: 'AWAITING_PAYMENT', heldAt: h.clock.now() } });
+  } finally { resume(); }
+  const result = await completion; expect(result.status).toBe(200); expect(result.body.order.status).toBe(restriction);
+  expect(await h.prisma.financialEntry.count({ where: { intentId: first, entryType: 'PAYMENT' } })).toBe(1);
+  expect((await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }, key).expect(200)).body).toEqual(result.body);
+});
+it.each(['ON_HOLD', 'CANCEL_PENDING'] as const)('reconciles already-saved success after local event audit rollback and later %s', async restriction => {
+  const { order, first } = await pendingPair(); const key = randomUUID(); const intent = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: first } });
+  const current = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  const audit = h.app.get(AuditService); const record = audit.record.bind(audit);
+  vi.spyOn(audit, 'record').mockImplementation(async (tx, value) => { const row = await record(tx, value); if (value.action === 'ORDER_PAYMENT_CONFIRMED') throw new Error('Injected post-effect event audit failure'); return row; });
+  await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }, key).expect(500);
+  expect(await h.app.get(SimulatedProviderStore).successCount(intent.businessNo)).toBe(1);
+  vi.restoreAllMocks();
+  if (restriction === 'CANCEL_PENDING') await cancel(order.id);
+  else await h.prisma.order.update({ where: { id: order.id }, data: { status: 'ON_HOLD', holdReason: 'TEST_HOLD', holdPreviousStatus: 'AWAITING_PAYMENT', heldAt: h.clock.now() } });
+  let completions = 0; const store = h.app.get(SimulatedProviderStore); const save = store.recordEvent.bind(store);
+  vi.spyOn(store, 'recordEvent').mockImplementation(event => { completions++; return save(event); });
+  const result = await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }, key).expect(200);
+  expect(result.body.order.status).toBe(restriction); expect(completions).toBe(0);
+  expect(await h.prisma.financialEntry.count({ where: { intentId: first, entryType: 'PAYMENT' } })).toBe(1);
+});
+it.each(['ON_HOLD', 'EXPIRED', 'ROLE_REVOKED'] as const)('rechecks %s after the pending external query before dispatch', async restriction => {
+  const { order, first } = await pendingPair(); const current = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  const adapter = h.app.get(SimulatedPaymentAdapter); const query = adapter.queryPayment.bind(adapter); const now = h.clock.now();
+  vi.spyOn(adapter, 'queryPayment').mockImplementationOnce(async businessNo => {
+    const pending = await query(businessNo);
+    if (restriction === 'ON_HOLD') await h.prisma.order.update({ where: { id: order.id }, data: { status: 'ON_HOLD', holdReason: 'TEST_HOLD', holdPreviousStatus: 'AWAITING_PAYMENT', heldAt: now } });
+    else if (restriction === 'EXPIRED') h.clock.set(order.paymentDeadline);
+    else await h.prisma.userRole.create({ data: { userId: h.actors.initiator.id, role: 'OPERATIONS' } });
+    return pending;
+  });
+  try {
+    await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }).expect(restriction === 'ROLE_REVOKED' ? 403 : 409);
+    const intent = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: first } });
+    expect(await h.app.get(SimulatedProviderStore).successCount(intent.businessNo)).toBe(0);
+    expect(await h.prisma.financialEntry.count({ where: { intentId: first } })).toBe(0);
+  } finally { h.clock.set(now); await h.prisma.userRole.deleteMany({ where: { userId: h.actors.initiator.id, role: 'OPERATIONS' } }); }
+});
+it('reconciles success saved during a stale pending query even when fresh dispatch is now held', async () => {
+  const { order, first } = await pendingPair(); const intent = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: first } });
+  const current = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  const adapter = h.app.get(SimulatedPaymentAdapter); const query = adapter.queryPayment.bind(adapter);
+  vi.spyOn(adapter, 'queryPayment').mockImplementationOnce(async businessNo => {
+    const pending = await query(businessNo);
+    await h.app.get(SimulatedProviderStore).recordEvent(signed(intent));
+    await h.prisma.order.update({ where: { id: order.id }, data: { status: 'ON_HOLD', holdReason: 'TEST_HOLD', holdPreviousStatus: 'AWAITING_PAYMENT', heldAt: h.clock.now() } });
+    return pending;
+  });
+  const result = await h.command(h.actors.initiator, driver(first), { expectedVersion: current.version }).expect(200);
+  expect(result.body.order.status).toBe('ON_HOLD');
+  expect(await h.app.get(SimulatedProviderStore).successCount(intent.businessNo)).toBe(1);
+  expect(await h.prisma.financialEntry.count({ where: { intentId: first, entryType: 'PAYMENT' } })).toBe(1);
+});
+it('samples the fresh completion deadline after waiting for the intent lock', async () => {
+  const { order, first } = await pendingPair(); const intent = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: first } });
+  const version = (await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } })).version;
+  const blocker = new Client({ connectionString: process.env.DATABASE_URL }); await blocker.connect(); const before = h.clock.now();
+  let response: Promise<{ status: number; body: { code: string } }> | undefined;
+  try {
+    await blocker.query('BEGIN'); await blocker.query('SELECT id FROM "PaymentIntent" WHERE id = $1::uuid FOR UPDATE', [first]);
+    const identity = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+    response = h.command(h.actors.initiator, driver(first), { expectedVersion: version }).then(result => result);
+    let blocked = false;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const rows = await h.prisma.$queryRaw<{ waiting: number }[]>`SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE ${identity.rows[0].pid} = ANY(pg_blocking_pids(pid))`;
+      if (rows[0].waiting > 0) { blocked = true; break; } await delay(10);
+    }
+    expect(blocked).toBe(true); h.clock.set(order.paymentDeadline); await blocker.query('COMMIT');
+    expect((await response).status).toBe(409);
+    expect(await h.app.get(SimulatedProviderStore).successCount(intent.businessNo)).toBe(0);
+    expect(await h.prisma.financialEntry.count({ where: { intentId: first, entryType: 'PAYMENT' } })).toBe(0);
+  } finally { await blocker.query('ROLLBACK'); await response; await blocker.end(); h.clock.set(before); }
+});
