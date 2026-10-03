@@ -13,9 +13,11 @@ import { OrdersModule } from './orders/orders.module.js';
 import { IntegrationsModule } from './integrations/integrations.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { TestingIntegrationsController } from './integrations/testing-integrations.controller.js';
+import { LogisticsModule } from './logistics/logistics.module.js';
+import { TestingLogisticsController } from './integrations/testing-logistics.controller.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule],
   controllers: [HealthController],
   providers: [
     {
@@ -26,6 +28,7 @@ import { TestingIntegrationsController } from './integrations/testing-integratio
 })
 export class AppModule {
   static forEnvironment(): DynamicModule {
-    return { module: AppModule, controllers: ['development', 'test'].includes(process.env.NODE_ENV ?? '') && process.env.PAYMENT_PROVIDER === 'simulated' ? [TestingIntegrationsController] : [] };
+    const testing = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
+    return { module: AppModule, controllers: [...(testing && process.env.PAYMENT_PROVIDER === 'simulated' ? [TestingIntegrationsController] : []), ...(testing && process.env.LOGISTICS_PROVIDER === 'simulated' ? [TestingLogisticsController] : [])] };
   }
 }

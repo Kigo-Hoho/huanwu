@@ -176,7 +176,7 @@ it('enforces version, pure customer, participant and strict command boundaries',
   await h.command(h.actors.initiator, path, { expectedVersion: 99 }).expect(409).expect(({ body }) => expect(body.code).toBe('PROPOSAL_VERSION_CONFLICT'));
   await h.command(h.actors.initiator, path, { expectedVersion: proposal.version, amountFen: 1 }).expect(400);
   await h.command(h.actors.initiator, path, { expectedVersion: proposal.version }, ' ').expect(400);
-  for (const action of ['shipments', 'handover', 'acceptance', 'issue']) await h.command(h.actors.initiator, `/api/orders/${randomUUID()}/${action}`, { expectedVersion: 1 }).expect(404);
+  for (const action of ['acceptance', 'issue']) await h.command(h.actors.initiator, `/api/orders/${randomUUID()}/${action}`, { expectedVersion: 1 }).expect(404);
   expect(await h.prisma.order.count({ where: { proposalId: proposal.id } })).toBe(0);
 });
 

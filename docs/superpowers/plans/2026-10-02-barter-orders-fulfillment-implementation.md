@@ -237,6 +237,8 @@ expect(cancelled.status).not.toBe('AWAITING_FULFILLMENT');
 
 ## Task 8: 双向快递、可信物流与面交
 
+**经实施裁决补充：** LogisticsModule 单向引用 OrdersModule／IntegrationsModule，以新增 `logistics/order-fulfillment.controller.ts` 承载既定 shipments／handover 路径，避免循环模块依赖；新增物理独立 `integrations/testing-logistics.controller.ts`，AppModule.forEnvironment 在环境设置后只按非生产 simulated logistics 选择，与付款路由分别选择。Shipment 的 orderId／side 无变更入口，服务端从不可变整侧 OrderItemSnapshot 及对侧 frozen OrderAddress 推导绑定，ORDER_SHIPMENT_SUBMITTED 的同事务不可删除审计保存 sorted snapshotIds／addressId／addressVersion；无新 schema、地址明文或 outbox 字段。OrderMutation 可选 auditMetadata 仅在提供时形成 `{order,metadata}`，旧命令审计形状保持原样。订单命令框架新增内部 admissionShipmentId（禁止与 admissionIntentId 同用），标记只含 orderId／shipmentId／expectedVersion；完整规范化哈希包括 progress 与两层资源身份。旧标记仅允许逻辑恢复，每次新外部事实仍需当前短锁授权和 fresh CLOCK；query 已保存事实始终可核对，拒绝新发送后重查 stale PENDING。可信 DELIVERED 的乱序事实可证明已经到达，但不伪造 collectedAt；测试驱动必须先 COLLECTED。受控 OrderHoldService 提前从任务9移入本任务，保留占用／既有 outstanding keys、保存未完成履约侧、同事务审计且不自行增 revision；调用者持锁并增一次。当前任务不实现验收、到期扫描或结算。
+
 **Files:** Create logistics port consumers service／events／outbox handler／module；Create `orders/order-handover.service.ts`；Modify order／testing controllers、registry；Create `test/phase3/order-fulfillment.e2e-spec.ts`、`logistics-events.e2e-spec.ts`。
 
 **Interfaces:** `ShipmentsService.submit(actor,id,input,key):Promise<OrderCommandResult>`；`LogisticsEventsService.applyVerified(event):Promise<void>`；`OrderHandoverService.confirm(actor,id,input,key):Promise<OrderCommandResult>`；LogisticsOutboxHandler 实现任务5接口。模拟 `POST /api/testing/shipments/:shipmentId/progress` 只自己的出件，expectedVersion／幂等，progress=COLLECTED|DELIVERED|EXCEPTION，经模拟适配器可信事件路径；DELIVERED 不能由该驱动跳过 COLLECTED。
@@ -257,9 +259,11 @@ expect(await incomingDeadlineMinusDelivered()).toBe(72 * 60 * 60 * 1000);
 
 ## Task 9: 双方验收、异常锁定与最终结算
 
-**Files:** Create `orders/order-acceptance.service.ts`、`order-hold.service.ts`，payments settlement.service.ts；Modify order／testing controllers、payment events／handler；Create `test/phase3/order-settlement.e2e-spec.ts`、`order-issues.e2e-spec.ts`。
+**Files:** Create `orders/order-acceptance.service.ts`，payments settlement.service.ts；Reuse／extend 任务8提前建立的 `orders/order-hold.service.ts`，整合现有私有资金异常 hold；Modify order／testing controllers、payment events／handler；Create `test/phase3/order-settlement.e2e-spec.ts`、`order-issues.e2e-spec.ts`。
 
 **Interfaces:** `OrderAcceptanceService.accept(actor,id,input,key):Promise<OrderCommandResult>`、`issue(actor,id,input,key):Promise<OrderCommandResult>`；`OrderHoldService.enter(tx,order,reason,now):Promise<void>`；`SettlementService.begin(tx,order,now):Promise<void>`、`tryFinalize(tx,orderId,now):Promise<boolean>`。完成返回与修订通过同一 mapOrder。
+
+OrderHoldService 的 supplied tx 契约：调用者已按订单→排序物品／占用→相关资金行顺序持锁、重读完整 LockedOrder 并提供锁后 CLOCK；enter 只写 hold 状态与 ORDER_HELD 审计，不增 revision、不释放占用、不恢复 ON_HOLD／COMPLETED／CANCELLED，调用者为自身转换增一次 revision。已有资金 admission keys 必须保留。
 
 - [ ] **Step 1: 写失败测试。** 自己来件未到／已逾期拒绝，不能代对方；双方验收才SETTLING；零差价无结算任务；部分／UNKNOWN不能完成、重复保证金返还不重复；异议锁定与验收／worker竞争；审计失败回滚最终下架与释放。
 

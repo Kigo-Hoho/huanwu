@@ -11,5 +11,6 @@ import { AddressCipher } from './address-cipher.js';
 import { OrderAddressService } from './order-address.service.js';
 import { IntegrationsModule } from '../integrations/integrations.module.js';
 import { OrderCancellationService } from './order-cancellation.service.js';
-@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService], exports: [OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService] })
+import { OrderHoldService } from './order-hold.service.js';
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService, OrderHoldService], exports: [OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService, OrderHoldService] })
 export class OrdersModule {}

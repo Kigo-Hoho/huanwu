@@ -164,6 +164,12 @@ CREATE 准入以订单锁内 CREATED→PENDING 和不可删除 ORDER_PAYMENT_ADM
 
 ## 发货、物流和面交
 
+任务8实施细化：LogisticsModule 单向依赖 OrdersModule／IntegrationsModule，新 OrderFulfillmentController 承载既定物流及面交路由；TestingLogisticsController 独立于付款驱动，只由环境设置后的 AppModule.forEnvironment 按 development／test 加 LOGISTICS_PROVIDER=simulated 注册，static AppModule／disabled／production 不注册。订单命令内部 admissionShipmentId 与付款 admissionIntentId 互斥；shipment／order／progress／expectedVersion 均进入规范化哈希。IN_PROGRESS 只保存安全资源标识及原版本，不是外部发新事实授权。驱动先 query，当前锁内身份／own side／阶段／取消／锁后时钟授权通过才提交独立签名事实；已保存事实及真正已进入外部的请求在 hold 后继续核对，禁止复活订单。不同 progress 用不同逻辑键，DELIVERED 驱动必须已有可信 COLLECTED。
+
+整侧绑定使用 Shipment.orderId／side 的确定映射（无重分配入口），不可变 ORDER_SHIPMENT_SUBMITTED 审计保存 shipmentId／side／排序的完整 snapshotIds／对侧冻结 addressId 及 version，不写姓名／电话／地址，不扩充固定 outbox payload。这里不宣称 Shipment SQL 列不可变；完整快照与绑定审计不可删除。OrderMutation.auditMetadata 只扩充新动作审计的 `{order,metadata}`，通用命令成功缓存不变。可信物流每个不同事件保留 IntegrationEvent／ShipmentEvent 及单独 receipt；重复同身份无二次进度审计，乱序不倒退。可信 DELIVERED 可先于 COLLECTED 到达，但不伪造 collectedAt；接收侧 incomingDeliveredAt／72小时截止以服务器锁后接受时间起算，外部 occurredAt 保留于运单事实。两侧可信揽收／到达分别进入运输／待验收，清除已经完成阶段的 fulfillmentDeadline。
+
+共同 OrderHoldService.enter 由任务8提前提供供任务9复用，使用调用者事务及锁后 now，不自行增 revision；记录原阶段／原因／时间及未完成履约侧，合并保留已有 outstanding keys，从不释放占用或恢复 hold／终态。事件调用者先检查当前已接受事实的 inclusive 期限，再登记迟到事实，一次转换只增加一次 revision。即使另一侧仍未揽收，先收到一侧的独立验收期限仍有效。物流 EXCEPTION 后后续事实留证，不恢复履约；真正到达证据可保存 deliveredAt，异常状态保持。
+
 COURIER 模式每方只能为自己的整侧物品提交一个运单；服务端绑定包裹包含的全部物品和对应收货资料，禁止漏件、替换参与方或选择别人订单的地址。规范化 carrier／trackingNumber 并验证格式；同一承运人运单号不能用于不同发货任务。
 
 提交运单只是“已登记”，不是“已发货”，必须经适配器可信揽收确认；两边均可信揽收才进入 IN_TRANSIT。当前数据格式校验不冒充真实揽收验证。已提交运单即视为可能已经交给承运人，不再允许通过取消释放物品；无效、重复或无揽收记录形成明确错误／异常状态。

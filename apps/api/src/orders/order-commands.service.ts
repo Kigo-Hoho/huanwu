@@ -12,8 +12,8 @@ import { mapOrder, type LockedOrder, type OrderTx } from './order.mapper.js';
 import { readOrder } from './order-reader.js';
 export type { LockedOrder, OrderTx } from './order.mapper.js';
 
-export interface OrderCommandContext { actor: AuthenticatedUser; id: string; input: OrderCommandInput; key: string; commandName: string; requestId?: string; admissionIntentId?: string }
-export type OrderMutation = (tx: OrderTx, order: LockedOrder, now: Date) => Promise<{ auditAction: string; paymentIntentId?: string }>;
+export interface OrderCommandContext { actor: AuthenticatedUser; id: string; input: OrderCommandInput; key: string; commandName: string; requestId?: string; admissionIntentId?: string; admissionShipmentId?: string }
+export type OrderMutation = (tx: OrderTx, order: LockedOrder, now: Date) => Promise<{ auditAction: string; paymentIntentId?: string; auditMetadata?: Prisma.InputJsonObject }>;
 export function orderRequestHash(id: string, input: OrderCommandInput): string {
   const canonicalize = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalize) : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, canonicalize(entry)])) : value;
   return createHash('sha256').update(JSON.stringify(canonicalize({ id, input }))).digest('hex');
@@ -33,6 +33,7 @@ export class OrderCommandsService {
   async execute(context: OrderCommandContext, mutate: OrderMutation): Promise<OrderCommandResult> {
     const { actor, id, input, key, commandName, requestId } = context;
     assertPureCustomer(actor);
+    if (context.admissionIntentId && context.admissionShipmentId) throw new Error('Ambiguous command admission resource');
     const requestHash = orderRequestHash(id, input);
     const identity = { actorId: actor.id, commandName, key };
     const where = { actorId_commandName_key: identity };
@@ -43,8 +44,8 @@ export class OrderCommandsService {
         assertOrderParticipant(order, actor.id);
         const previous = await tx.idempotencyRecord.findUnique({ where });
         if (previous) {
-          if (context.admissionIntentId && previous.requestHash === requestHash && (previous.response as Prisma.JsonObject).status === 'IN_PROGRESS') {
-            return { order: mapOrder(order), paymentIntentId: context.admissionIntentId };
+          if ((context.admissionIntentId || context.admissionShipmentId) && previous.requestHash === requestHash && (previous.response as Prisma.JsonObject).status === 'IN_PROGRESS') {
+            return { order: mapOrder(order), ...(context.admissionIntentId ? { paymentIntentId: context.admissionIntentId } : {}) };
           }
           return replayOrderCommand(previous, requestHash);
         }
@@ -60,8 +61,8 @@ export class OrderCommandsService {
         const updated = await readOrder(tx, id);
         assertOrderParticipant(updated, actor.id);
         const result = OrderCommandResultSchema.parse({ order: mapOrder(updated), ...(mutation.paymentIntentId ? { paymentIntentId: mutation.paymentIntentId } : {}) });
-        await this.audit.record(tx, { actorId: actor.id, action: mutation.auditAction, entityType: 'Order', entityId: id, requestId, before: before as unknown as Prisma.InputJsonValue, after: result.order as unknown as Prisma.InputJsonValue });
-        await tx.idempotencyRecord.update({ where, data: { response: context.admissionIntentId ? { status: 'IN_PROGRESS', orderId: id, intentId: context.admissionIntentId, expectedVersion: input.expectedVersion } : result as unknown as Prisma.InputJsonValue } });
+        await this.audit.record(tx, { actorId: actor.id, action: mutation.auditAction, entityType: 'Order', entityId: id, requestId, before: before as unknown as Prisma.InputJsonValue, after: (mutation.auditMetadata ? { order: result.order, metadata: mutation.auditMetadata } : result.order) as unknown as Prisma.InputJsonValue });
+        await tx.idempotencyRecord.update({ where, data: { response: context.admissionIntentId ? { status: 'IN_PROGRESS', orderId: id, intentId: context.admissionIntentId, expectedVersion: input.expectedVersion } : context.admissionShipmentId ? { status: 'IN_PROGRESS', orderId: id, shipmentId: context.admissionShipmentId, expectedVersion: input.expectedVersion } : result as unknown as Prisma.InputJsonValue } });
         return result;
       });
     } catch (error) {
