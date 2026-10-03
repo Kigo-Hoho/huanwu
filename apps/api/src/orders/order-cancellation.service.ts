@@ -112,10 +112,10 @@ export class OrderCancellationService {
     if (!order || order.status !== 'CANCEL_PENDING') return false;
     if (order.shipments.length || order.parties.some(party => party.handedOverAt || party.incomingDeliveredAt || party.acceptedAt)) return false;
     await this.reservations.lockItems(tx, order.items.map(item => item.itemId));
-    now = this.clock.now();
     order = await readOrder(tx, orderId);
     if (!order || order.status !== 'CANCEL_PENDING') return false;
     const payments = await this.lockPayments(tx, orderId);
+    now = this.clock.now();
     const entries = await tx.financialEntry.findMany({ where: { intentId: { in: payments.map(payment => payment.id) } } });
     return this.finalizeLocked(tx, order, payments, entries, null, now, true);
   }

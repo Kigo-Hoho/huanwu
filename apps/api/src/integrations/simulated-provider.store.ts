@@ -11,7 +11,7 @@ import { INTEGRATION_CONFIG, integrationConfiguration, integrationUnavailable, t
 const identity = { provider: z.literal('simulated'), eventId: z.string().min(1).max(200), businessNo: z.string().min(1).max(200), occurredAt: z.iso.datetime() };
 const money = { amountFen: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), currency: z.literal('CNY') };
 const eventSchema = z.union([
-  z.object({ ...identity, ...money, kind: z.enum(['PAYMENT_SUCCEEDED', 'PAYMENT_CLOSED', 'REFUND_SUCCEEDED', 'DIFFERENCE_SETTLED']), externalTransactionId: z.string().min(1).max(200) }).strict(),
+  z.object({ ...identity, ...money, currency: z.string().regex(/^[A-Z]{3}$/), kind: z.enum(['PAYMENT_SUCCEEDED', 'PAYMENT_CLOSED', 'REFUND_SUCCEEDED', 'DIFFERENCE_SETTLED']), externalTransactionId: z.string().min(1).max(200) }).strict(),
   z.object({ ...identity, kind: z.literal('SHIPMENT_PROGRESS'), shipmentId: z.uuid(), progress: z.enum(['REGISTERED', 'COLLECTED', 'DELIVERED', 'EXCEPTION']) }).strict(),
 ]);
 const invalid = () => new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Integration event or operation is invalid' });

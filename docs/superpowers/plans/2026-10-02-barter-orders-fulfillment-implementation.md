@@ -215,6 +215,8 @@ expect(await h.prisma.itemReservation.count({ where: { orderId: paidOrderId } })
 
 ## Task 7: 双方付款、可信资金事件与取消退款
 
+**经实施裁决补充：** 付款路径由 PaymentsModule 中的独立 PaymentsController 承载，AppModule 单向导入该模块，不让 OrdersModule 反向依赖。私有 PaymentPort.checkout 可选能力不扩展 ProviderResult；AppModule.forEnvironment 在 bootstrap／harness 设置环境后仅按非生产 simulated payment 注册测试控制器。模拟完成复用 OrderCommandsService 的内部 admissionIntentId 模式，保存 IN_PROGRESS 标记及完整订单／意图哈希，提交准入审计后独立产生外部事实，经共同事件事务后保存首份安全成功响应。币种结构验证允许三位大写字符串，业务仅 CNY，错误值保留隔离证据。可信退款先到时留 PENDING receipt 待原付款登记重处理。CREATE 的不可删除准入审计用于证明从未发送：仅明确 NOT_FOUND 且从未准入的 CREATED 意图可以本地审计关闭，无假提供方事件／账本；此 close outbox 的 FAILED／ORIGINAL_PAYMENT_NOT_FOUND 是已安全解决的无外部操作历史，已准入的不确定请求必须 UNKNOWN 持续核对。REQUESTED 协商不推迟资金齐备起算的共同72小时，仍禁止实际履约／去件地址／结算；拒绝／撤回不延长期限。完整细化见获准规格“测试适配器的隔离”。
+
 **Files:** Create payments service／events／outbox handler／module；Create integrations testing controller；Modify orders controller／module、integration registry；Create `test/phase3/order-payments.e2e-spec.ts`、`payment-events.e2e-spec.ts`；Modify `.env.example`。
 
 **Interfaces:** `PaymentsService.start(actor,id,input,key):Promise<OrderCommandResult>`、`checkout(actor,id,intentId):Promise<CheckoutView>`；`PaymentEventsService.applyVerified(event:VerifiedIntegrationEvent):Promise<void>`；`PaymentOutboxHandler` 实现任务5 handler。测试 `POST /api/testing/payments/:intentId/complete` 仅纯CUSTOMER本人，要求 Idempotency-Key／订单 expectedVersion，固定模拟成功金额从 intent 推导；先改变独立模拟外部事实，再经可信事件处理，审计失败可核对恢复。

@@ -17,7 +17,7 @@ export function configureApp(app: INestApplication): void {
 }
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule.forEnvironment());
   configureApp(app);
   await app.listen(Number(process.env.PORT ?? 3000));
 }

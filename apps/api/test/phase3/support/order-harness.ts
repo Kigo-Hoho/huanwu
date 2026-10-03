@@ -22,7 +22,7 @@ export class MutableClock implements Clock {
 export async function createOrderHarness() {
   const database = await createPhase3Database();
   const clock = new MutableClock();
-  const module = await Test.createTestingModule({ imports: [AppModule] })
+  const module = await Test.createTestingModule({ imports: [AppModule.forEnvironment()] })
     .overrideProvider(CLOCK).useValue(clock)
     .overrideProvider(OutboxWorker).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();

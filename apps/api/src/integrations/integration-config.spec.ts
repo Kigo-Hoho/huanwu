@@ -16,7 +16,7 @@ it('disabled payment/logistics ports reject every capability with 503 before any
   const store = new SimulatedProviderStore({} as PrismaService, new SystemClock(), { payment: 'disabled', logistics: 'disabled' });
   const payment = new SimulatedPaymentAdapter(store); const logistics = new SimulatedLogisticsAdapter(store);
   const op: ProviderOperation = { businessNo: 'unused', orderId: 'unused', kind: 'CREATE_PAYMENT', payload: {} };
-  for (const call of [() => payment.createPayment(op), () => payment.closePayment(op), () => payment.refundPayment(op), () => payment.settleDifference(op), () => payment.queryPayment('unused'), () => payment.queryRefund('unused'), () => payment.querySettlement('unused'), () => logistics.verifyShipment(op), () => logistics.queryShipment('unused')]) {
+  for (const call of [() => payment.checkout('unused'), () => payment.createPayment(op), () => payment.closePayment(op), () => payment.refundPayment(op), () => payment.settleDifference(op), () => payment.queryPayment('unused'), () => payment.queryRefund('unused'), () => payment.querySettlement('unused'), () => logistics.verifyShipment(op), () => logistics.queryShipment('unused')]) {
     await expect(call()).rejects.toMatchObject({ status: 503 });
   }
   expect(() => payment.verifySignedEvent('{}', '')).toThrow();

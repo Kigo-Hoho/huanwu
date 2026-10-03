@@ -146,6 +146,16 @@ PaymentPort 至少定义创建付款、查询付款、关闭未完成付款、�
 
 ### 测试适配器的隔离
 
+任务 7 实施细化：PaymentsModule 单向引用 OrdersModule，通过独立 PaymentsController 提供既定付款与 checkout 路径，避免反向模块依赖。PaymentPort 增加可选 `checkout(businessNo):Promise<CheckoutView>`，缺少能力返回 503；仅付款本人独立 GET 调用，前后重验参与权限、状态和期限，外部 await 不持业务锁。参数不进入 ProviderResult、outbox、审计或幂等响应；模拟 READY 只表示原外部付款已创建且仍 pending，参数仅为明确的模拟描述。
+
+受控完成命令先使用原订单命令框架，在订单锁内保存仅含订单／意图／expectedVersion 的 IN_PROGRESS 幂等准入标记并增加一次用户修订及审计。完整规范化哈希包含订单与意图标识。标记不是成功响应；释放事务后查询同业务号，生成固定事件／交易标识并独立提交模拟事实，再走共同资金事件事务，最后锁定保存首份脱敏成功响应。并发及失败重试先重新核验当前客户身份、本人义务和原哈希；已有准入可继续核对已发生事实，不因后续版本或阶段变化丢失恢复路径，不复活订单。
+
+AppModule.forEnvironment() 在实际启动与测试环境设置之后选择控制器：仅 development／test 且显式 simulated payment 注册付款测试路由；static AppModule、production、disabled 均不注册。物流配置单独选择后续物流驱动，不因仅开启物流而开放付款测试路由。签名可信资金事件的币种允许三个大写字母以保留错误币种证据；操作 payload、付款义务和成功账本仍只允许 CNY。金额／币种／类型／关联错误保存不可变事件和 REJECTED receipt，不完成付款。退款先于付款入账时保存 PENDING receipt，原付款登记后重处理同一事件。
+
+CREATE 准入以订单锁内 CREATED→PENDING 和不可删除 ORDER_PAYMENT_ADMITTED 审计持久保存，查询或重试不得重置。取消时原外部业务号明确 NOT_FOUND、意图仍 CREATED 且不存在任何准入审计／资金记录，才允许在同一事务记录 ORDER_PAYMENT_CLOSED_WITHOUT_EXTERNAL_INTENT、closedAt 及安全取消；不伪造提供方成功事件或资金账本。该历史 close outbox 为 FAILED／ORIGINAL_PAYMENT_NOT_FOUND，表示没有执行外部关闭，与已安全关闭的业务义务区分。存在任意已准入或未知请求时，NOT_FOUND 保持 UNKNOWN 并继续同业务号核对，保留占用。
+
+资金放行中的“无取消”指未进入 CANCEL_PENDING／CANCELLED；REQUESTED 取消协商仍阻止实际发货、交接、去件地址开放和结算，但不阻止可信资金登记。支付期限内资金齐备即起算共同 72 小时并清除旧支付期限，取消请求拒绝／撤回不重设此期限。终态矛盾事实保留资金异常 receipt，不改变终态或已经交给其他业务的占用；非终态关闭与付款矛盾进入 ON_HOLD。
+
 显式 PAYMENT_PROVIDER=simulated／LOGISTICS_PROVIDER=simulated 只允许 development 或 test，订单响应带 simulation 标识，页面突出显示“测试支付／测试物流，不产生真实资金或寄递”。生产启动选择模拟服务立即失败。
 
 测试支付完成只允许已认证 CUSTOMER 对自己所属订单、自己付款义务执行，不允许传入成功金额或其他参与人。模拟完成事件必须通过与正式接入共用的可信事件处理和审计路径，不能直接调用 Prisma 改订单状态。

@@ -287,6 +287,25 @@ async function waitForBlocked(blockerPid: number) {
   }
   throw new Error('Expected command to wait on the held database lock');
 }
+it('timestamps final cancellation after waiting for the financial lock', async () => {
+  const created = await order('IN_PERSON');
+  const intent = await h.prisma.paymentIntent.create({ data: { orderId: created.id, side: 'RECIPIENT', purpose: 'DEPOSIT', amountFen: 1000, businessNo: randomUUID(), provider: 'simulated', status: 'PENDING' } });
+  const pending = await requested(created.id); await agree(created.id, pending.cancellation.id).expect(200);
+  await h.prisma.paymentIntent.update({ where: { id: intent.id }, data: { status: 'CLOSED', closedAt: h.clock.now() } });
+  const blocker = new Client({ connectionString: process.env.DATABASE_URL }); await blocker.connect();
+  const now = h.clock.now(); let completion: Promise<boolean> | undefined;
+  try {
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT id FROM "PaymentIntent" WHERE id = $1::uuid FOR UPDATE', [intent.id]);
+    completion = finalize(created.id);
+    const identity = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+    await waitForBlocked(identity.rows[0].pid);
+    h.clock.advance(90000); await blocker.query('COMMIT');
+    expect(await completion).toBe(true);
+    const audit = await h.prisma.auditLog.findFirstOrThrow({ where: { entityId: created.id, action: 'ORDER_CANCELLED' } });
+    expect(audit.after).toMatchObject({ cancelledAt: h.clock.now().toISOString() });
+  } finally { await blocker.query('ROLLBACK'); await completion; await blocker.end(); h.clock.set(now); }
+});
 it.each(['Order', 'Item', 'PaymentIntent'] as const)('rechecks the deadline after waiting for the %s lock', async table => {
   const created = await order('IN_PERSON');
   const intent = await h.prisma.paymentIntent.create({ data: { orderId: created.id, side: 'RECIPIENT', purpose: 'DEPOSIT', amountFen: 1000, businessNo: randomUUID(), provider: 'simulated', status: 'PENDING' } });

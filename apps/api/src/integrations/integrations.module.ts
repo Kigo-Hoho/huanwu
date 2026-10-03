@@ -18,6 +18,6 @@ import { SimulatedLogisticsAdapter } from './simulated-logistics.adapter.js';
     { provide: PAYMENT_PORT, useExisting: SimulatedPaymentAdapter },
     { provide: LOGISTICS_PORT, useExisting: SimulatedLogisticsAdapter },
   ],
-  exports: [OutboxService, OutboxWorker, OutboxHandlerRegistry, SimulatedProviderStore, SimulatedPaymentAdapter, SimulatedLogisticsAdapter, PAYMENT_PORT, LOGISTICS_PORT],
+  exports: [INTEGRATION_CONFIG, OutboxService, OutboxWorker, OutboxHandlerRegistry, SimulatedProviderStore, SimulatedPaymentAdapter, SimulatedLogisticsAdapter, PAYMENT_PORT, LOGISTICS_PORT],
 })
 export class IntegrationsModule {}

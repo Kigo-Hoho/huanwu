@@ -12,7 +12,7 @@ import { mapOrder, type LockedOrder, type OrderTx } from './order.mapper.js';
 import { readOrder } from './order-reader.js';
 export type { LockedOrder, OrderTx } from './order.mapper.js';
 
-export interface OrderCommandContext { actor: AuthenticatedUser; id: string; input: OrderCommandInput; key: string; commandName: string; requestId?: string }
+export interface OrderCommandContext { actor: AuthenticatedUser; id: string; input: OrderCommandInput; key: string; commandName: string; requestId?: string; admissionIntentId?: string }
 export type OrderMutation = (tx: OrderTx, order: LockedOrder, now: Date) => Promise<{ auditAction: string; paymentIntentId?: string }>;
 export function orderRequestHash(id: string, input: OrderCommandInput): string {
   const canonicalize = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalize) : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, canonicalize(entry)])) : value;
@@ -42,7 +42,12 @@ export class OrderCommandsService {
         const order = await readOrder(tx, id);
         assertOrderParticipant(order, actor.id);
         const previous = await tx.idempotencyRecord.findUnique({ where });
-        if (previous) return replayOrderCommand(previous, requestHash);
+        if (previous) {
+          if (context.admissionIntentId && previous.requestHash === requestHash && (previous.response as Prisma.JsonObject).status === 'IN_PROGRESS') {
+            return { order: mapOrder(order), paymentIntentId: context.admissionIntentId };
+          }
+          return replayOrderCommand(previous, requestHash);
+        }
         await tx.idempotencyRecord.create({ data: { ...identity, requestHash, response: {} } });
         const now = this.clock.now();
         const before = mapOrder(order);
@@ -56,7 +61,7 @@ export class OrderCommandsService {
         assertOrderParticipant(updated, actor.id);
         const result = OrderCommandResultSchema.parse({ order: mapOrder(updated), ...(mutation.paymentIntentId ? { paymentIntentId: mutation.paymentIntentId } : {}) });
         await this.audit.record(tx, { actorId: actor.id, action: mutation.auditAction, entityType: 'Order', entityId: id, requestId, before: before as unknown as Prisma.InputJsonValue, after: result.order as unknown as Prisma.InputJsonValue });
-        await tx.idempotencyRecord.update({ where, data: { response: result as unknown as Prisma.InputJsonValue } });
+        await tx.idempotencyRecord.update({ where, data: { response: context.admissionIntentId ? { status: 'IN_PROGRESS', orderId: id, intentId: context.admissionIntentId, expectedVersion: input.expectedVersion } : result as unknown as Prisma.InputJsonValue } });
         return result;
       });
     } catch (error) {

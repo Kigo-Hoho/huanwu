@@ -110,11 +110,12 @@ it('reconciles external success after local apply failure and recreated store/wo
   expect((await row(op)).status).toBe('SUCCEEDED'); expect(await restarted.successCount(op.businessNo)).toBe(1);
 });
 it.each(['UNKNOWN', 'PENDING'] as const)('reconciles %s every 30 seconds without resending', async status => {
-  const op = await operation(); await enqueue(op); let queries = 0;
+  const op = await operation(); await enqueue(op); let queries = 0; let executions = 0;
   const value = handler(); value.query = async () => { queries++; return { status }; };
-  value.execute = async () => { throw new Error('unsafe resend'); };
+  value.execute = async () => { executions++; throw new Error('unsafe resend'); };
   await worker(value).tick(); h.clock.advance(29999); await worker(value).tick(); expect(queries).toBe(1);
   h.clock.advance(1); await worker(value).tick(); expect(queries).toBe(2);
+  expect(executions).toBe(0);
   expect(await store.successCount(op.businessNo)).toBe(0); expect((await row(op)).status).toBe(status);
   // Keep unfinished commands from participating in later tests.
   await h.prisma.outboxCommand.update({ where: { businessNo: op.businessNo }, data: { availableAt: new Date('2099-01-01') } });
@@ -228,5 +229,5 @@ it('shipment verification stays pending until signed progress and does not regre
   const malformed = { ...event, shipmentId: 'invalid' }; expect(() => verify(malformed)).toThrow();
   const wrongAmount = { provider: 'simulated', eventId: randomUUID(), kind: 'PAYMENT_SUCCEEDED', businessNo: randomUUID(), occurredAt: h.clock.now().toISOString(), externalTransactionId: randomUUID(), amountFen: 0, currency: 'CNY' };
   expect(() => signed(wrongAmount)).toThrow();
-  expect(() => signed({ ...wrongAmount, amountFen: 1000, currency: 'USD' })).toThrow();
+  expect(() => signed({ ...wrongAmount, amountFen: 1000, currency: 'not-a-currency' })).toThrow();
 });
