@@ -66,6 +66,7 @@ export function MyItemsPage({
     <View>
       <Button {...buttonRole} onClick={() => navigateToDetail('/pages/items/discover/index')}>找换</Button>
       <Button {...buttonRole} onClick={() => navigateToDetail('/pages/proposals/list/index')}>投物箱</Button>
+      <Button {...buttonRole} onClick={() => navigateToDetail('/pages/orders/list/index')}>我的订单</Button>
       {error ? <Text {...alertRole}>{error}</Text> : null}
       {sections.map((section) => (
         <View key={section.status}>

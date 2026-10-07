@@ -48,6 +48,8 @@ export const OrderPartyViewSchema = z.strictObject({
   side: OrderSideSchema, userId: uuid, addressReady: z.boolean(),
   payments: z.array(OrderPaymentViewSchema).max(2).refine(payments => new Set(payments.map(p => p.purpose)).size === payments.length, 'Payment purposes must be unique'),
   outgoingShipment: OrderShipmentViewSchema.nullable(), incomingDeliveredAt: nullableTime,
+  // Optional only for immutable successful responses cached before this projection existed.
+  handedOverAt: nullableTime.optional(),
   acceptanceDeadline: nullableTime, acceptedAt: nullableTime,
 });
 export const OrderCancellationViewSchema = z.strictObject({

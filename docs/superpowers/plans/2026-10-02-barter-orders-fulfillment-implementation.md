@@ -316,6 +316,8 @@ expect((await newExpiredCommand()).body.code).toBe('ORDER_EXPIRED');
 
 ## Task 11: 小程序订单工作台
 
+经执行控制器批准的最小范围修正：除原 Taro 前端交付外，只补充共享 OrderPartyView `handedOverAt: UTC ISO|null` 与已有 mapper 的只读投影，使单方面交进度可在刷新后可靠展示和禁止重复交接／取消；无业务状态规则、权限、迁移更改。仅新增字段允许缺省以读取历史不可变成功幂等摘要，缺省必须按未知处理并取新鲜详情。增加共享 schema 和现有真实 HTTP 单方面交进度投影 RED／GREEN。AuthenticatedApiClient 新增专用 typed `orderRequest` 组合接口复用原认证；OrderApi 的严格边界、RAM-only 未决 body／key、身份切换清除和原未知请求重试均在此任务实现。浏览器回归使用独立拥有的 Phase3 测试库，不迁移／重置已有基础库；任务13正式端到端文件另行交付。
+
 **Files:** Create `features/orders/order-api.ts`、`order-api.test.ts`；Create `pages/orders/list/index.tsx`、`detail/index.tsx`、`address-form.tsx`、`payment-actions.tsx`、`fulfillment-actions.tsx`、`orders.test.tsx`；Modify app.config.ts、globals.d.ts、lib/api-client.ts、proposal detail和mine入口、config/index.ts。
 
 **Interfaces:** OrderApi `convertProposal,listMyOrders,getOrder,saveAddress,getShippingAddress,startPayment,getCheckout,submitShipment,confirmHandover,acceptOrder,reportIssue,requestCancellation,respondCancellation,withdrawCancellation` 严格映射共享schema；`runLogicalCommand(resourceId,action,input):Promise<OrderCommandResult>` 保存body／key，网络和5xx保留，确定性冲突刷新后重新确认。

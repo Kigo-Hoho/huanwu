@@ -4,6 +4,7 @@ import type { ItemView, ProposalView } from '@barter/contracts';
 import { ProposalForm } from './proposal-form';
 import { ProposalDetailPage } from './detail/index';
 import { ApiClientError } from '../../lib/api-client';
+import { orderFixture } from '../../test/order-fixtures';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const item: ItemView = { id: id(1), ownerId: id(10), title: '我的咖啡机', description: '保存完好的咖啡机', referenceValueFen: 2000, condition: 'GOOD', imageUrls: [], wantedText: '', status: 'ACTIVE', version: 1, rejectReason: null, createdAt: '2026-09-29T00:00:00.000Z', updatedAt: '2026-09-29T00:00:00.000Z' };
@@ -11,6 +12,30 @@ const snapshot = { ...item, itemId: item.id, itemVersion: 1 };
 const proposal: ProposalView = { id: id(5), initiatorId: id(10), recipientId: id(11), responderId: id(11), status: 'PENDING', version: 3, currentVersion: 1, expiresAt: '2026-10-06T00:00:00.000Z', confirmedAt: null, reservationExpiresAt: null, createdAt: item.createdAt, updatedAt: item.updatedAt, versions: [{ id: id(6), number: 1, authorId: id(10), createdAt: item.createdAt, offeredItems: [snapshot], targetItem: { ...snapshot, itemId: id(2), ownerId: id(11), title: '对方背包' }, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 }] };
 
 describe('proposal workbench', () => {
+  it('converts a confirmed proposal explicitly and opens its order entry', async () => {
+    const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11), roles: ['CUSTOMER'] }), getProposal: vi.fn().mockResolvedValue(confirmed), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };
+    const orderApi = { convertProposal: vi.fn().mockResolvedValue({ order: orderFixture() }) };
+    render(<ProposalDetailPage api={api} orderApi={orderApi} proposalId={proposal.id} />);
+    fireEvent.click(await screen.findByRole('button', { name: '生成交换订单' }));
+    expect(await screen.findByRole('button', { name: '查看交换订单' })).toBeVisible();
+    expect(orderApi.convertProposal).toHaveBeenCalledWith(proposal.id, { expectedVersion: 3 });
+    expect(screen.queryByRole('button', { name: '取消提案' })).not.toBeInTheDocument();
+  });
+  it('does not attach a delayed conversion to a different proposal after navigation', async () => {
+    const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11), roles: ['CUSTOMER'] }), getProposal: vi.fn().mockResolvedValue(confirmed), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };
+    let resolve!: (value: { order: ReturnType<typeof orderFixture> }) => void;
+    const orderApi = { convertProposal: vi.fn().mockReturnValue(new Promise(r => { resolve = r; })) };
+    const page = render(<ProposalDetailPage api={api} orderApi={orderApi} proposalId={proposal.id} />);
+    fireEvent.click(await screen.findByRole('button', { name: '生成交换订单' }));
+    const second = { ...confirmed, id: id(9), versions: [{ ...confirmed.versions[0]!, number: 2 }], currentVersion: 2 };
+    api.getProposal.mockResolvedValue(second); page.rerender(<ProposalDetailPage api={api} orderApi={orderApi} proposalId={second.id} />);
+    await screen.findByText('方案历史 · 第 2 版');
+    await act(async () => { resolve({ order: orderFixture() }); });
+    expect(screen.queryByRole('button', { name: '查看交换订单' })).not.toBeInTheDocument();
+    expect(screen.getByText('方案历史 · 第 2 版')).toBeVisible();
+  });
   it('shows converted status without proposal commands or obsolete no-order guidance', async () => {
     const converted: ProposalView = { ...proposal, status: 'CONVERTED', orderId: id(20) };
     const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11) }), getProposal: vi.fn().mockResolvedValue(converted), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };

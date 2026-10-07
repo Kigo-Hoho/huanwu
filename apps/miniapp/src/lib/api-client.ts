@@ -35,6 +35,7 @@ interface RequestResult {
 }
 
 export type RequestPort = (options: RequestOptions) => Promise<RequestResult>;
+export type OrderRequestPath = `/api/orders/${string}` | `/api/me/orders${string}` | `/api/proposals/${string}/order` | `/api/testing/payments/${string}/complete` | `/api/testing/shipments/${string}/progress`;
 
 interface AuthSessionResponse {
   accessToken: string;
@@ -121,6 +122,11 @@ export class AuthenticatedApiClient {
 
   getMe(): Promise<{ id: string; roles: Role[] }> {
     return this.authorized('/api/me', 'GET', undefined, {}, true);
+  }
+
+  // Dedicated composition seam; validation and logical keys belong to OrderApi.
+  orderRequest(path: OrderRequestPath, method: 'GET' | 'POST', data?: unknown, key?: string): Promise<unknown> {
+    return this.authorized(path, method, data, key ? { 'Idempotency-Key': key } : {}, true);
   }
 
   listProposals(direction: 'sent' | 'received'): Promise<ProposalView[]> {

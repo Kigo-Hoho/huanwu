@@ -5,6 +5,13 @@ const identityProvider = process.env.TARO_APP_IDENTITY_PROVIDER ?? 'taro';
 const target = process.env.TARO_ENV ?? 'weapp';
 const buildEnvironment =
   process.env.TARO_APP_ENVIRONMENT ?? process.env.NODE_ENV ?? 'development';
+const integrationMode = process.env.TARO_APP_INTEGRATION_MODE ?? 'disabled';
+if (!['disabled', 'simulated'].includes(integrationMode)) throw new Error('Unknown integration mode.');
+if (integrationMode === 'simulated' &&
+  !((process.env.TARO_APP_ENVIRONMENT === 'development' && buildEnvironment === 'development' && process.env.NODE_ENV !== 'production') ||
+    (buildEnvironment === 'acceptance' && target === 'h5' && identityProvider === 'acceptance'))) {
+  throw new Error('Simulated integrations require explicit development or acceptance H5 identity builds; production is forbidden.');
+}
 
 if (!['taro', 'acceptance'].includes(identityProvider)) {
   throw new Error(`Unknown identity provider: ${identityProvider}`);
@@ -35,6 +42,7 @@ export default defineConfig<'webpack5'>(async (_merge, { command, mode }) => {
       __IDENTITY_PROVIDER__: JSON.stringify(identityProvider),
       __BUILD_ENVIRONMENT__: JSON.stringify(buildEnvironment),
       __TARO_TARGET__: JSON.stringify(target),
+      __INTEGRATION_MODE__: JSON.stringify(integrationMode),
       __ACCEPTANCE_IDENTITY_CODE__: JSON.stringify(
         identityProvider === 'acceptance' ? 'e2e-customer-code' : '',
       ),

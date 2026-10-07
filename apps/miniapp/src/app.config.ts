@@ -8,6 +8,8 @@ export default defineAppConfig({
     'pages/proposals/create/index',
     'pages/proposals/list/index',
     'pages/proposals/detail/index',
+    'pages/orders/list/index',
+    'pages/orders/detail/index',
   ],
   window: {
     navigationBarTitleText: '以物换物',

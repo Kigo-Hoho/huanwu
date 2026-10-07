@@ -74,6 +74,9 @@ it('same-key concurrent registration replays once and binds the full order resou
 it('records independent in-person handovers and starts both incoming deadlines only after both', async () => {
   const created = await order('IN_PERSON');
   const first = await h.command(h.actors.initiator, `/api/orders/${created.id}/handover`, { expectedVersion: created.version }).expect(200);
+  const fresh = await h.get(h.actors.initiator, `/api/orders/${created.id}`).expect(200);
+  expect(fresh.body.parties.find((p: { side: string }) => p.side === 'INITIATOR').handedOverAt).toBe(h.clock.now().toISOString());
+  expect(fresh.body.parties.find((p: { side: string }) => p.side === 'RECIPIENT').handedOverAt).toBeNull();
   expect(first.body.order.status).toBe('AWAITING_FULFILLMENT'); expect(first.body.order.parties.every((p: { incomingDeliveredAt: string | null }) => p.incomingDeliveredAt === null)).toBe(true);
   await h.command(h.actors.recipient, `/api/orders/${created.id}/cancellation`, { expectedVersion: first.body.order.version, reason: '请求取消交换' }).expect(409).expect(({ body }) => expect(body.code).toBe('ORDER_FULFILLMENT_STARTED'));
   h.clock.advance(1000);

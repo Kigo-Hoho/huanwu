@@ -24,6 +24,13 @@ const order = () => ({
 });
 
 describe('order boundary contracts', () => {
+  it('projects persisted handover timestamps while allowing old immutable success summaries', () => {
+    const base = party('INITIATOR', id(8));
+    expect(c.OrderPartyViewSchema.safeParse({ ...base, handedOverAt: time }).success).toBe(true);
+    expect(c.OrderPartyViewSchema.safeParse({ ...base, handedOverAt: null }).success).toBe(true);
+    expect(c.OrderPartyViewSchema.safeParse(base).success).toBe(true);
+    expect(c.OrderPartyViewSchema.safeParse({ ...base, handedOverAt: '2026-10-02T08:00:00+08:00' }).success).toBe(false);
+  });
   it.each([0, -1, 1.5, '1', undefined])('requires a positive integer version: %s', (expectedVersion) => {
     expect(c.OrderCommandSchema.safeParse({ expectedVersion }).success).toBe(false);
   });

@@ -26,7 +26,7 @@ export function mapOrder(order: LockedOrder): OrderView {
         addressReady: party.addressReady,
         payments: order.payments.filter(payment => payment.side === party.side).map(payment => ({ id: payment.id, purpose: payment.purpose, amountFen: payment.amountFen, currency: 'CNY', status: payment.status })),
         outgoingShipment: shipment ? { id: shipment.id, carrier: shipment.carrier, trackingNumber: shipment.trackingNumber, status: shipment.status, registeredAt: shipment.registeredAt.toISOString(), collectedAt: time(shipment.collectedAt), deliveredAt: time(shipment.deliveredAt) } : null,
-        incomingDeliveredAt: time(party.incomingDeliveredAt), acceptanceDeadline: time(party.acceptanceDeadline), acceptedAt: time(party.acceptedAt),
+        handedOverAt: time(party.handedOverAt), incomingDeliveredAt: time(party.incomingDeliveredAt), acceptanceDeadline: time(party.acceptanceDeadline), acceptedAt: time(party.acceptedAt),
       };
     }),
     cancellation: cancellation ? { id: cancellation.id, requestedBySide: cancellation.requestedBySide, reason: cancellation.reason, status: cancellation.status, requestedAt: cancellation.requestedAt.toISOString(), respondedAt: time(cancellation.respondedAt) } : null,
