@@ -1,21 +1,34 @@
 import pg from 'pg';
-import { afterAll, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { PrismaService } from '../../src/database/prisma.service.js';
 import { createOrderHarness } from './support/order-harness.js';
 import * as databases from './support/database-fixtures.js';
 
 let allocated: Awaited<ReturnType<typeof databases.createPhase3Database>> | undefined;
+let initialization: ReturnType<typeof createOrderHarness> | undefined;
 const source = process.env.DATABASE_URL!;
-afterAll(async () => { vi.restoreAllMocks(); await allocated?.close(); });
+afterAll(async () => {
+  // A timed-out hook does not cancel its promise; never race its ordinary DROP.
+  const unexpectedHarness = await initialization?.catch(() => undefined);
+  vi.restoreAllMocks();
+  try { await unexpectedHarness?.close(); }
+  finally { await allocated?.close(); }
+});
 
-it('drops the real owned clone and restores the source environment after connected application initialization fails', async () => {
+beforeAll(async () => {
   const create = databases.createPhase3Database;
   vi.spyOn(databases, 'createPhase3Database').mockImplementationOnce(async () => { allocated = await create(); return allocated; });
   const initialize = PrismaService.prototype.onModuleInit;
   vi.spyOn(PrismaService.prototype, 'onModuleInit').mockImplementationOnce(async function (this: PrismaService) {
     await initialize.call(this); throw Error('injected connected initialization failure');
   });
-  await expect(createOrderHarness()).rejects.toThrow('injected connected initialization failure');
+  // Owned database preparation and physical cleanup use the existing fixture hook budget.
+  initialization = createOrderHarness();
+  await initialization.catch(() => undefined);
+});
+
+it('drops the real owned clone and restores the source environment after connected application initialization fails', async () => {
+  await expect(initialization).rejects.toThrow('injected connected initialization failure');
   expect(process.env.DATABASE_URL === source).toBe(true);
   expect(allocated).toBeDefined();
   const inspector = new pg.Client({ connectionString: source });

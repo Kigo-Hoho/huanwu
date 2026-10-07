@@ -324,6 +324,10 @@ expect((await newExpiredCommand()).body.code).toBe('ORDER_EXPIRED');
 
 任务11复核 R1–R3：仅补充 actor／order-owned RAM 未决元数据和内部原请求重试接口、actor／order／version 表单身份及私密回调清理、最新 getMe 请求 epoch 防迟到身份变更；保持既有签名兼容与一次认证重试。新增真实同 API 实例卸载／重挂载、新版本、同版本参与方切换资料、迟到身份响应回归；共享契约、后台和持久化不更改。
 
+用户确认的额外 I1／R1 窄修复（2026-10-07）：仅在 AuthenticatedApiClient 内将认证发送结果关联实际成功请求的 Session RAM revision／epoch，getMe 绑定前拒绝已替换凭据的旧证明；认证重试使用重试本身的版本。真实 Session＋传输＋OrderApi 组合先复现恢复会话 actor=null、A 身份请求等待时 storage 换成 B、没有新 getMe 的地址写入／私有读取问题，并覆盖合法初次绑定、同用户认证及 TTL、迟到无效证明与最新读取。保留原身份、未知请求及重挂载回归与真实浏览器隐私流程，六项最终 gate 分别记录；独立复核及最终结项仍等待实际证据，不在此预先标记通过。
+
+本轮验证的单文件测试生命周期修正：真实 owned-cleanup 回归中普通 DROP 的阶段计时为 26.42 秒，加上准备超过既有 30 秒测试期限，备用清理与原 Promise 发生第二次 DROP 重叠。经控制器裁决，将该测试的真实初始化失败及完整清理置于既有 beforeAll 准备阶段，断言仍核验原失败、源环境恢复和目录实际缺席；afterAll 先等待同一 Promise，再执行普通备用清理。30 秒 test／60 秒 hook、并发、数据库 helper 与物理持久化配置均保持，失败及诊断证据保留，最终六门在此修正后重新独立执行。
+
 **Interfaces:** OrderApi `convertProposal,listMyOrders,getOrder,saveAddress,getShippingAddress,startPayment,getCheckout,submitShipment,confirmHandover,acceptOrder,reportIssue,requestCancellation,respondCancellation,withdrawCancellation` 严格映射共享schema；`runLogicalCommand(resourceId,action,input):Promise<OrderCommandResult>` 保存body／key，网络和5xx保留，确定性冲突刷新后重新确认。
 
 - [ ] **Step 1: 写失败组件／传输测试。** 真实入口、双方进度、模拟提示、自己的动作、资料／付款pending、快递／面交条件、取消阻挡；403／409刷新、旧请求不得覆盖新结果、结果不明重复点击复用键、无完整资料响应写本地缓存。

@@ -35,6 +35,11 @@ interface RequestResult {
   data: unknown;
 }
 
+interface AuthorizedResponse<T> {
+  data: T;
+  identity: ReturnType<Session['getIdentity']>;
+}
+
 export type RequestPort = (options: RequestOptions) => Promise<RequestResult>;
 export type OrderRequestPath = `/api/orders/${string}` | `/api/me/orders${string}` | `/api/proposals/${string}/order` | `/api/testing/payments/${string}/complete` | `/api/testing/shipments/${string}/progress`;
 
@@ -150,11 +155,16 @@ export class AuthenticatedApiClient {
   }
 
   async getMe(): Promise<{ id: string; roles: Role[] }> {
-    const read = ++this.identityRead; const starting = this.session.getIdentity();
-    const me = await this.authorized<unknown>('/api/me', 'GET', undefined, {}, true);
+    const read = ++this.identityRead;
+    const response = await this.authorizedResponse<unknown>('/api/me', 'GET', undefined, {}, true);
     if (read !== this.identityRead) throw new OrderIdentityChangedError();
+    const current = this.session.getIdentity();
+    // Proof belongs to the credential used by the successful send, including a 401 replay.
+    // Check before invalidating malformed proof so a late response cannot clear a newer identity.
+    if (response.identity.credentialRevision !== current.credentialRevision) throw new OrderIdentityChangedError();
+    const me = response.data;
     if (!validUser(me)) { this.session.bindIdentity(null); throw new OrderIdentityChangedError(); }
-    if (starting.epoch !== this.session.getIdentity().epoch && this.session.getIdentity().actorId !== me.id) throw new OrderIdentityChangedError();
+    if (response.identity.epoch !== current.epoch && current.actorId !== me.id) throw new OrderIdentityChangedError();
     this.session.bindIdentity(me.id);
     return me;
   }
@@ -225,15 +235,27 @@ export class AuthenticatedApiClient {
     additionalHeaders: Record<string, string> = {},
     retryAfterAuthentication = false,
   ): Promise<T> {
-    const execute = (): Promise<T> => {
+    return (await this.authorizedResponse<T>(path, method, data, additionalHeaders, retryAfterAuthentication)).data;
+  }
+
+  private async authorizedResponse<T>(
+    path: string,
+    method: RequestOptions['method'],
+    data?: unknown,
+    additionalHeaders: Record<string, string> = {},
+    retryAfterAuthentication = false,
+  ): Promise<AuthorizedResponse<T>> {
+    const execute = async (): Promise<AuthorizedResponse<T>> => {
       const token = this.session.getAccessToken();
       if (!token) throw new Error('Customer authentication is required.');
-      return this.send<T>({
+      const identity = this.session.getIdentity();
+      const response = await this.send<T>({
         url: path,
         method,
         data,
         header: { Authorization: `Bearer ${token}`, ...additionalHeaders },
       });
+      return { data: response, identity };
     };
 
     try {
