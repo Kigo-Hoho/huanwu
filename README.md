@@ -128,6 +128,27 @@ Phase 2 的 CONFIRMED 表示最新方案的所有 2～6 件物品被独占占用
 
 地址采用 AES-256-GCM。运行环境提供 32 字节 Base64 `ADDRESS_ENCRYPTION_KEY_BASE64`、版本 `ADDRESS_ENCRYPTION_KEY_VERSION`，模拟签名另用独立 32 字节 `SIMULATED_INTEGRATION_SIGNING_KEY_BASE64`。E2E 每次运行内生成并在同次 API 启动／重启间复用，完成后释放；密钥仅交给 API，不进入 H5/管理端构建、日志、仓库或审计。长期环境需自行保管加密密钥和版本，不可在已有密文仍需读取时随意换钥。
 
-验收 H5 必须同时显式设置 `TARO_APP_ENVIRONMENT=acceptance`、`TARO_APP_IDENTITY_PROVIDER=acceptance`、`TARO_APP_INTEGRATION_MODE=simulated` 且目标为 H5；页面还要求 API 的 simulation 标识。测试驱动仅提交自己的模拟支付／物流外部事实，不直接改订单数据库。七条浏览器流程保留原三条，并新增五换一快递含差价、未交接双边取消退款、无运单双方面交、390px 运营只读。前置帮助函数仅上传／发布／审核和确认提案；建单、付款、履约、取消与验收均从页面执行，双方使用隔离会话。
+验收 H5 必须同时显式设置 `TARO_APP_ENVIRONMENT=acceptance`、`TARO_APP_IDENTITY_PROVIDER=acceptance`、`TARO_APP_INTEGRATION_MODE=simulated` 且目标为 H5；页面还要求 API 的 simulation 标识。测试驱动仅提交自己的模拟支付／物流外部事实，不直接改订单数据库。Task 13 的七条浏览器流程保留原三条，并新增五换一快递含差价、未交接双边取消退款、无运单双方面交、390px 运营只读；整分支修复再增加真实 API 的跨身份命令／私有资料保护流程，最终共八条。前置帮助函数仅上传／发布／审核和确认提案；建单、付款、履约、取消与验收均从页面执行，双方使用隔离会话。
 
-完成状态和逐项证据见第三阶段计划与执行记录。Task 13 独立审查和整分支审查在控制器完成前均保持待审；本地质量门不代表 GitHub CI 已运行，未经授权不推送、开 PR 或合并。
+## Phase 3 本地完成记录（2026-10-07）
+
+13 项实施任务及各自独立审查已完成。首次整分支审查在 `879c015` 的结论为 **With fixes**（Critical 0／Important 1／Minor 4）。首轮修复 `a028db1` 经独立复核解决 M3 安全诊断分类和 M4 部分初始化清理，但 I1／R1 身份证明关联仍未解决；用户随后明确授权额外窄修复 `daa7f27`。最终独立复核确认 I1／R1 已解决、无新增 Critical／Important、范围内未解决项为空。任务—提交—审查对照及历史失败见[第三阶段完成记录](docs/superpowers/plans/2026-10-02-barter-orders-fulfillment-implementation.md#2026-10-07-本地完成记录)。这里完成的是受控模拟闭环。
+
+最终行为提交 `daa7f27` 上，六项质量门分别独立执行：
+
+| 命令 | 退出码／结果 |
+| --- | --- |
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0，610 项通过 |
+| `npm run build` | 0，保留下述警告 |
+| `npm run verify` | 0，独立重复 610 项测试并完成构建 |
+| `npm run e2e` | 0，8／8 通过，拥有的测试库销毁和源库保护证明通过 |
+
+610 = root 12 + admin 29 + 旧 API 137 + Phase 3 API 259 + miniapp 128 + contracts 45。原 Task 13 的 569 项／7 条浏览器流程是修复前历史结果。增量升级专项 1／1 在独占库保留原六件租约及不可变历史，已包含于 Phase 3 测试总数，不能重复加计。本机 Docker／WSL2 不可用，实际验证使用官方 PostgreSQL 17.11／UTC，未替换为 SQLite。GitHub CI 已配置但本分支未远程运行；分支尚未推送、开 PR、合并或部署，集成方式等待用户选择。
+
+保留的关注项：首次 verify 的 `OrderApi is not a constructor` 与额外修复验证中的 undefined `MyItemsPage` 是两个不同且原因未确认的加载事件；后续通过只证明未复发，不能声称已修好或同一根因。构建仍有管理端 1,458.98 kB 超过 1300 kB、Taro vendor 671 KiB 超过 244 KiB 及 NoAsyncChunks 警告，浏览器仍有 Ant Design React 兼容与 Descriptions 布局警告。安全诊断分类已修复，但旧的图片清理 throwing-finally 在同时失败时仍可能替换更早的诊断；数据库清理及保护证明继续执行且失败仍致命。普通 DROP 的 26.42 秒计时证实了一次清理测试生命周期重叠，已修正该测试准备／销毁等待；测试和 hook 时限未改，未证明 Windows／IO 性能根因。未来复发须诊断，不能循环重试直到通过。
+
+最终只读证明显示保留源库 `barter` 仍只有原两次 migration、12 张 public 表行数不变、遗留 Phase 3 测试库为零。这是迁移／计数／目录证据，不是逐字节备份。源库**尚未升级为可运行的 Phase 3 演示／业务库**；新迁移只在独占的新建／增量升级测试库验证。未来部署必须明确选择并备份目标库，应用已提交的 migration 和运行配置后再启动服务；质量门不会静默升级保留源库。运行只需仓库已提交的入口与自行配置的环境，不依赖私有临时辅助程序。含测试凭据／地址的日志和 trace 私下保留，不提交或上传。
+
+真实微信身份、生产图片存储、支付资金路径、物流合作方、地址密钥管理、第四阶段异常／售后和第五阶段上线质量门仍是正式运营依赖。

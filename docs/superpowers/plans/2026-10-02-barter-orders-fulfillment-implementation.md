@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-整分支单次修复波（2026-10-07）：I1 最小扩展既有 Session 的 RAM actor／epoch 与订单传输失效订阅；订单每次发送、自动认证重试和结果交付绑定发起身份。同用户换 token 或自然过期保留原 body／key，变化或不可证身份清除旧 RAM／页面私有状态并要求刷新及显式重新确认。M3 仅增加 E2E setup／child／cleanup／proof 安全固定诊断分类；M4 在测试 helper 内保留部分初始化资源，逐一尝试关闭并聚合错误。既有 runner、连接池、超时、源库及原两迁移保持；独立复核和最终完成状态仍由实际后续证据裁定。
+整分支首轮修复（2026-10-07，`a028db1`）：I1 最小扩展既有 Session 的 RAM actor／epoch 与订单传输失效订阅；订单每次发送、自动认证重试和结果交付绑定发起身份。同用户换 token 或自然过期保留原 body／key，变化或不可证身份清除旧 RAM／页面私有状态并要求刷新及显式重新确认。M3 仅增加 E2E setup／child／cleanup／proof 安全固定诊断分类；M4 在测试 helper 内保留部分初始化资源，逐一尝试关闭并聚合错误。首轮独立复核确认 M3／M4 已解决，I1／R1 仍未解决；用户随后明确授权额外窄修复 `daa7f27`，最终独立复核才关闭 I1／R1。不是原单轮授权内无条件追加。既有 runner、连接池、超时、源库及原两迁移保持；实际证据见文末完成记录。
 
 - 全部金额为 CNY 整数分，API 时间为 UTC ISO 8601；差价固定取确认方案的 0～20000 分与付款方向。
 - 测试规则版本 `phase3-test-v1`：每人保证金 1000 分、平台服务费 0 分；资料 24 小时、支付 24 小时、双方共同履约 72 小时、每方验收 72 小时。
@@ -93,7 +93,7 @@ OrderCancellation 保存 REQUESTED／AGREED／REJECTED／WITHDRAWN／EXPIRED，S
 
 **Interfaces:** consumes ProposalTerms／ProposalItemSnapshot；produces 本节 OrderView／OrderCommandResult／OrderListView 及对应 Zod schema、OrderCommandSchema、OrderAddressSchema、OrderPaymentSchema、OrderShipmentSchema、OrderIssueSchema、OrderCancellationSchema、OrderCancellationRespondSchema、OrderCancellationWithdrawSchema；`testOrderRules():OrderRulesSnapshot`、`dueDeadline(order:OrderView,now:Date):'DETAILS'|'PAYMENT'|'FULFILLMENT'|'INSPECTION'|null`、`CLOCK`／Clock。Proposal 新增 CONVERTED 和可空 orderId，非 CONVERTED 旧视图保持兼容，CONVERTED 必须具备关联订单 ID。
 
-- [ ] **Step 1: 写契约与策略失败测试。** 正整数 expectedVersion、未知字段、不可传金额／side／受益人、取消历史 ID、时间格式、跨侧数量、脱敏投影；策略仅检查当前阶段，终态和结算不受旧截止时间影响。
+- [x] **Step 1: 写契约与策略失败测试。** 正整数 expectedVersion、未知字段、不可传金额／side／受益人、取消历史 ID、时间格式、跨侧数量、脱敏投影；策略仅检查当前阶段，终态和结算不受旧截止时间影响。
 
 ```ts
 expect(OrderPaymentSchema.safeParse({ expectedVersion: 1, purpose: 'DEPOSIT', amountFen: 1 }).success).toBe(false);
@@ -102,10 +102,10 @@ expect(dueDeadline(paymentOrder, new Date(paymentOrder.paymentDeadline!))).toBe(
 expect(dueDeadline({ ...paymentOrder, status: 'SETTLING' }, farFuture)).toBeNull();
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm test --workspace @barter/contracts -- orders.test.ts`；随后构建 contracts，再 `npm exec --workspace @barter/api -- vitest run src/orders/order-policy.spec.ts`。应因缺少 schema／策略或断言失败，不因数据库连接失败。
-- [ ] **Step 3: 最小实现。** 所有 schema 为 strictObject；姓名 1～80、电话 5～32、地区 1～200、地址 4～500 字符，取消 reason 4～300、异议 4～1000；去首尾空白，carrier 2～32、trackingNumber 3～64 并标准化大写。运单不允许物品集合字段。时钟默认 SystemClock，不用全局 fake timers 改 JWT 时间。errors.ts 增加规格 API 章节列出的全部错误码，保持现有 ApiErrorBody／requestId 格式。
-- [ ] **Step 4: GREEN。** 重跑上述测试及 `npm run typecheck`；旧提案契约测试继续通过。
-- [ ] **Step 5: 审查并提交。** `feat: define order contracts and lifecycle rules`。只加入本任务文件，不导出无占用建单接口。
+- [x] **Step 2: 观察 RED。** `npm test --workspace @barter/contracts -- orders.test.ts`；随后构建 contracts，再 `npm exec --workspace @barter/api -- vitest run src/orders/order-policy.spec.ts`。应因缺少 schema／策略或断言失败，不因数据库连接失败。
+- [x] **Step 3: 最小实现。** 所有 schema 为 strictObject；姓名 1～80、电话 5～32、地区 1～200、地址 4～500 字符，取消 reason 4～300、异议 4～1000；去首尾空白，carrier 2～32、trackingNumber 3～64 并标准化大写。运单不允许物品集合字段。时钟默认 SystemClock，不用全局 fake timers 改 JWT 时间。errors.ts 增加规格 API 章节列出的全部错误码，保持现有 ApiErrorBody／requestId 格式。
+- [x] **Step 4: GREEN。** 重跑上述测试及 `npm run typecheck`；旧提案契约测试继续通过。
+- [x] **Step 5: 审查并提交。** `feat: define order contracts and lifecycle rules`。只加入本任务文件，不导出无占用建单接口。
 
 ## Task 2: 增量持久化、统一占用和独立测试库
 
@@ -113,7 +113,7 @@ expect(dueDeadline({ ...paymentOrder, status: 'SETTLING' }, farFuture)).toBeNull
 
 **Interfaces:** `reservationIsAvailable(reservation:ItemReservation|null,now:Date):boolean`；`ReservationsService.lockItems(tx,ids:string[]):Promise<void>`、`assertProposalLease(tx,proposalId,proposalVersionId,itemIds,now):Promise<void>`、`handoffToOrder(tx,proposalId,orderId,itemIds):Promise<void>`、`releaseOrder(tx,orderId):Promise<void>`。测试支持 `createPhase3Database():Promise<{url:string,close():Promise<void>}>`。
 
-- [ ] **Step 1: 写失败测试。** 测试新表／约束、互斥所有者、完整交接、不可变内容、原物品不受订单租约时间影响；升级测试先在新建临时库只部署原两次迁移，保存六件租约和历史，再部署新迁移并逐字段比较。
+- [x] **Step 1: 写失败测试。** 测试新表／约束、互斥所有者、完整交接、不可变内容、原物品不受订单租约时间影响；升级测试先在新建临时库只部署原两次迁移，保存六件租约和历史，再部署新迁移并逐字段比较。
 
 ```ts
 expect(reservationIsAvailable({ ...lease, orderId, proposalId: null, proposalVersionId: null, expiresAt: null }, farFuture)).toBe(false);
@@ -122,14 +122,14 @@ await expect(updateOrderItemSnapshot()).rejects.toThrow(/immutable/i);
 await expect(insertReservationWithTwoOwners()).rejects.toThrow(/check constraint/i);
 ```
 
-- [ ] **Step 2: 观察 RED。** 单独运行 policy 测试；数据库正常后 `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts persistence.e2e-spec.ts migration-upgrade.e2e-spec.ts`。缺表／字段／约束是预期 RED。
-- [ ] **Step 3: 最小实现。** 按固定模型键生成未应用迁移并用 apply_patch 加 CHECK、触发器、部分唯一索引，包括 AuditLog 的 UPDATE／DELETE 不可变保护；`npm run db:migrate --workspace @barter/api -- --create-only --name orders`，开发库与显式 SHADOW_DATABASE_URL 均限制在本次随机命名空间，不同意 drift reset。generate 后逐一改造创建／counter／accept／公开查询的占用判定，处理 expiresAt 可空；取消和 expire 只释放提案所有者行，按同一排序锁定。ProposalsModule 注入 CLOCK，将裁决当前时间改为 Clock.now，默认行为不变，让转换与提案清理共用测试时钟。
-- [ ] **Step 4: GREEN。** 在临时 PostgreSQL 库运行迁移和上述测试、旧 proposals／public-items 测试及 typecheck。新数据库配置仅包含 `test/phase3/**/*.e2e-spec.ts`，原配置排除这一目录；API `test` 顺序运行原配置和 phase3 配置，lint／tsconfig 显式包含新配置文件。global setup 创建已迁移的临时模板，旧 API 配置的模板另执行原种子；每个新旧集成测试文件克隆独立数据库，纯单元测试不分配数据库。旧配置 setupFiles 在测试模块求值前设置 DATABASE_URL，覆盖顶层 Prisma 构造；保留文件并行、禁止同文件并发，以逆序 afterAll 在文件 app／client 关闭后清理并恢复环境。删除旧文件边界的审计／报价／用户清理和 DISABLE TRIGGER 绕过，文件内原测试断言、业务性 fixture 操作保持。所有名字必须符合 `barter_p3_<本次随机命名空间>_*`、小于 PostgreSQL 标识长度；退出关闭连接后只删除自己创建的数据库，绝不删除 DATABASE_URL 原库。失败保留清理错误，不强删无关数据。
+- [x] **Step 2: 观察 RED。** 单独运行 policy 测试；数据库正常后 `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts persistence.e2e-spec.ts migration-upgrade.e2e-spec.ts`。缺表／字段／约束是预期 RED。
+- [x] **Step 3: 最小实现。** 按固定模型键生成未应用迁移并用 apply_patch 加 CHECK、触发器、部分唯一索引，包括 AuditLog 的 UPDATE／DELETE 不可变保护；`npm run db:migrate --workspace @barter/api -- --create-only --name orders`，开发库与显式 SHADOW_DATABASE_URL 均限制在本次随机命名空间，不同意 drift reset。generate 后逐一改造创建／counter／accept／公开查询的占用判定，处理 expiresAt 可空；取消和 expire 只释放提案所有者行，按同一排序锁定。ProposalsModule 注入 CLOCK，将裁决当前时间改为 Clock.now，默认行为不变，让转换与提案清理共用测试时钟。
+- [x] **Step 4: GREEN。** 在临时 PostgreSQL 库运行迁移和上述测试、旧 proposals／public-items 测试及 typecheck。新数据库配置仅包含 `test/phase3/**/*.e2e-spec.ts`，原配置排除这一目录；API `test` 顺序运行原配置和 phase3 配置，lint／tsconfig 显式包含新配置文件。global setup 创建已迁移的临时模板，旧 API 配置的模板另执行原种子；每个新旧集成测试文件克隆独立数据库，纯单元测试不分配数据库。旧配置 setupFiles 在测试模块求值前设置 DATABASE_URL，覆盖顶层 Prisma 构造；保留文件并行、禁止同文件并发，以逆序 afterAll 在文件 app／client 关闭后清理并恢复环境。删除旧文件边界的审计／报价／用户清理和 DISABLE TRIGGER 绕过，文件内原测试断言、业务性 fixture 操作保持。所有名字必须符合 `barter_p3_<本次随机命名空间>_*`、小于 PostgreSQL 标识长度；退出关闭连接后只删除自己创建的数据库，绝不删除 DATABASE_URL 原库。失败保留清理错误，不强删无关数据。
 
 **Task 2 范围澄清（2026-10-02）：** 规格要求审计历史数据库不可变，但前两次迁移缺少 AuditLog 保护，旧测试通过删除审计和临时禁用报价保护清理共享数据库。执行控制器确认以新增迁移补齐保护，并最小扩展旧集成测试隔离，按文件丢弃本次拥有的临时库；不修改旧迁移、关闭保护或通过串行化隐藏冲突。
 
 **Task 2 审查修正 I1（2026-10-03）：** 原 API 配置拆为 Vitest 内联 unit／integration projects，共享既有 forks、隔离与文件并行配置；只有 integration project 注册模板 globalSetup 和文件 setupFiles，由 Vitest 原生测试选择决定初始化，禁止解析 CLI 文件名猜测。增加子进程回归，移除 DATABASE_URL 及全部 PHASE3_* 后分别运行 reservation-policy／order-policy，确保纯单元选择既不克隆数据库也不初始化模板；保持旧 API 并行集成及 phase3 持久化／升级覆盖。
-- [ ] **Step 5: 审查并提交。** `feat: persist orders and unify item reservations`。记录升级证据；数据库未可用时不得声称任务完成。
+- [x] **Step 5: 审查并提交。** `feat: persist orders and unify item reservations`。记录升级证据；数据库未可用时不得声称任务完成。
 
 ## Task 3: 原子建单、订单查询与用户命令边界
 
@@ -141,7 +141,7 @@ await expect(insertReservationWithTwoOwners()).rejects.toThrow(/check constraint
 
 测试 harness 提供 app／prisma／可注入 clock、initiator／recipient／outsider／operator／mixed actors、`confirmedProposal({offeredCount?,mode?,differenceFen?,payer?})`、`command(actor,path,input,key?)`／`get(actor,path)` 的 Supertest 响应、`convert(proposal,actor?,key?)`、`faultAuditOnce(afterInsert?:boolean)` 和 `close()`；每个测试文件单独数据库，禁止后台自动扫描污染其他测试时钟。
 
-- [ ] **Step 1: 写失败测试。** 两人竞争转换只创建一个订单；缺／错／多租约、过期边界、错版本、第三人、运营及混合角色；同键重放及跨资源哈希；审计插入后再抛错验证真正事务回滚。
+- [x] **Step 1: 写失败测试。** 两人竞争转换只创建一个订单；缺／错／多租约、过期边界、错版本、第三人、运营及混合角色；同键重放及跨资源哈希；审计插入后再抛错验证真正事务回滚。
 
 ```ts
 expect(first.body.order.status).toBe('AWAITING_DETAILS');
@@ -150,10 +150,10 @@ expect((await h.command(h.actors.mixed, path, body)).status).toBe(403);
 expect((await h.get(h.actors.outsider, `/api/orders/${id}`)).status).toBe(404);
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-conversion.e2e-spec.ts orders-query.e2e-spec.ts`，预期路由缺失／占用未交接。
-- [ ] **Step 3: 最小实现。** 使用共同事务和排序锁；锁后核对实际时间、完整现版与租约，再创建规则／条款／物品快照和双方进度，面交待支付、快递待资料。关联订单从唯一 Order.proposalId 查询，不建立双向循环外键。第二方新键返回 409 PROPOSAL_ALREADY_CONVERTED 并提供关联标识；原成功键仍 201 重放。列表 `(createdAt DESC,id DESC)`、默认20／最大100、严格解码游标。execute 初期遇到到期仅明确拒绝，不开放未实现资金／发货命令；任务10完成共同到期转换。
-- [ ] **Step 4: GREEN。** 上述测试、原 proposal 测试、lint／typecheck；断言租约原位转 orderId、旧 expire／cancel 不释放、详情／幂等均无敏感字段。
-- [ ] **Step 5: 审查并提交。** `feat: convert confirmed proposals into atomic orders`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-conversion.e2e-spec.ts orders-query.e2e-spec.ts`，预期路由缺失／占用未交接。
+- [x] **Step 3: 最小实现。** 使用共同事务和排序锁；锁后核对实际时间、完整现版与租约，再创建规则／条款／物品快照和双方进度，面交待支付、快递待资料。关联订单从唯一 Order.proposalId 查询，不建立双向循环外键。第二方新键返回 409 PROPOSAL_ALREADY_CONVERTED 并提供关联标识；原成功键仍 201 重放。列表 `(createdAt DESC,id DESC)`、默认20／最大100、严格解码游标。execute 初期遇到到期仅明确拒绝，不开放未实现资金／发货命令；任务10完成共同到期转换。
+- [x] **Step 4: GREEN。** 上述测试、原 proposal 测试、lint／typecheck；断言租约原位转 orderId、旧 expire／cancel 不释放、详情／幂等均无敏感字段。
+- [x] **Step 5: 审查并提交。** `feat: convert confirmed proposals into atomic orders`。
 
 ## Task 4: 加密收货资料与最小授权读取
 
@@ -161,7 +161,7 @@ expect((await h.get(h.actors.outsider, `/api/orders/${id}`)).status).toBe(404);
 
 **Interfaces:** `AddressCipher.encrypt(address:OrderAddressView,{orderId,side,version}):EncryptedAddress`、`decrypt(value,context):OrderAddressView`，EncryptedAddress 含 keyVersion／nonce／tag／ciphertext。`OrderAddressService.save(actor,id,input,key):Promise<OrderCommandResult>`、`get(actor,id,{side:'self'|'outgoing'}):Promise<OrderAddressView>`。
 
-- [ ] **Step 1: 写失败测试。** 随机 nonce、AAD 防跨订单／侧重放、错误 tag／key；只改自己、冻结后拒绝；付款前不能读对方；资金满足后自己的发货资料访问有审计；原始库、审计和幂等缓存均无明文。
+- [x] **Step 1: 写失败测试。** 随机 nonce、AAD 防跨订单／侧重放、错误 tag／key；只改自己、冻结后拒绝；付款前不能读对方；资金满足后自己的发货资料访问有审计；原始库、审计和幂等缓存均无明文。
 
 ```ts
 expect(cipher.encrypt(address, context).ciphertext).not.toEqual(cipher.encrypt(address, context).ciphertext);
@@ -169,10 +169,10 @@ expect(JSON.stringify(await h.prisma.idempotencyRecord.findMany())).not.toContai
 expect(JSON.stringify(await h.prisma.auditLog.findMany())).not.toContain(address.detail);
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run src/orders/address-cipher.spec.ts`；`npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-address.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** AES 参数按工具说明；使用 ADDRESS_ENCRYPTION_KEY_BASE64 和 ADDRESS_ENCRYPTION_KEY_VERSION，不提交密钥。未配置时能力明确503，绝不明文回退；纯前阶段 API 启动无需解密资料。双方齐全后冻结并启动24小时支付期限；POST 仅摘要，独立 GET 权限投影和对方资料访问审计，禁止列表带明文。
-- [ ] **Step 4: GREEN。** 上述测试及 typecheck；用 harness 临时完成资金前置条件测试读取，不注册假支付业务路由。
-- [ ] **Step 5: 审查并提交。** `feat: protect order shipping details`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run src/orders/address-cipher.spec.ts`；`npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-address.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** AES 参数按工具说明；使用 ADDRESS_ENCRYPTION_KEY_BASE64 和 ADDRESS_ENCRYPTION_KEY_VERSION，不提交密钥。未配置时能力明确503，绝不明文回退；纯前阶段 API 启动无需解密资料。双方齐全后冻结并启动24小时支付期限；POST 仅摘要，独立 GET 权限投影和对方资料访问审计，禁止列表带明文。
+- [x] **Step 4: GREEN。** 上述测试及 typecheck；用 harness 临时完成资金前置条件测试读取，不注册假支付业务路由。
+- [x] **Step 5: 审查并提交。** `feat: protect order shipping details`。
 
 ## Task 5: 可核对的外部适配器和持久化 outbox
 
@@ -182,7 +182,7 @@ expect(JSON.stringify(await h.prisma.auditLog.findMany())).not.toContain(address
 
 **Interfaces:** `OutboxService.enqueue(tx,operation:ProviderOperation):Promise<OutboxCommand>`；`OutboxWorker.tick():Promise<void>`；registry `register(kind,handler:IntegrationOperationHandler)`，handler `query(operation):Promise<ProviderResult>`、`execute(operation):Promise<ProviderResult>`、`apply(operation,result):Promise<void>`。PaymentPort 的创建／关闭／退款／结算方法接收 ProviderOperation，查询方法接收 businessNo:string，均返回 Promise<ProviderResult>；方法名称固定 createPayment／queryPayment／closePayment／refundPayment／queryRefund／settleDifference／querySettlement。LogisticsPort `verifyShipment(operation:ProviderOperation):Promise<ProviderResult>`、`queryShipment(businessNo:string):Promise<ProviderResult>`。模拟 adapter 的 `verifySignedEvent(raw:string,signature:string):VerifiedIntegrationEvent` 只为测试 provider 验签；SimulatedProviderStore `successCount(businessNo:string):Promise<number>` 查询独立持久化的成功执行次数。`selectIntegration({nodeEnv,provider}:{nodeEnv:string,provider:string}):'disabled'|'simulated'` 校验环境与名称。
 
-- [ ] **Step 1: 写失败测试。** 并发 worker 只领取一次、租约回收、先查询同编号；外部成功后 worker 崩溃再次查询不重复执行；UNKNOWN 不重发；生产模拟／未知provider拒绝，未配置能力503。
+- [x] **Step 1: 写失败测试。** 并发 worker 只领取一次、租约回收、先查询同编号；外部成功后 worker 崩溃再次查询不重复执行；UNKNOWN 不重发；生产模拟／未知provider拒绝，未配置能力503。
 
 ```ts
 expect(await simulatedStore.successCount(operation.businessNo)).toBe(1);
@@ -190,10 +190,10 @@ expect(await h.prisma.outboxCommand.count({ where: { businessNo: operation.busin
 expect(() => selectIntegration({ nodeEnv: 'production', provider: 'simulated' })).toThrow();
 ```
 
-- [ ] **Step 2: 观察 RED。** config unit 测试，再 `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts outbox.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** outbox 业务号唯一，领取30秒租约、使用 SKIP LOCKED，正常每秒 tick；UNKNOWN／未完成每30秒核对同号，绝不将超时转换为新请求。仅首次未执行或查询明确 NOT_FOUND 可 execute；已执行不再创建新号。模拟外部结果独立持久化，在订单事务外提交；未知handler保留明确不可执行，不默认成功。生产拒绝模拟，disabled provider 明确503，测试没有长睡眠。
-- [ ] **Step 4: GREEN。** 上述测试、typecheck；断言跨 provider 网络调用时不存在未释放的订单事务，worker 关闭清理 timer。
-- [ ] **Step 5: 审查并提交。** `feat: add durable integration commands and test adapters`。
+- [x] **Step 2: 观察 RED。** config unit 测试，再 `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts outbox.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** outbox 业务号唯一，领取30秒租约、使用 SKIP LOCKED，正常每秒 tick；UNKNOWN／未完成每30秒核对同号，绝不将超时转换为新请求。仅首次未执行或查询明确 NOT_FOUND 可 execute；已执行不再创建新号。模拟外部结果独立持久化，在订单事务外提交；未知handler保留明确不可执行，不默认成功。生产拒绝模拟，disabled provider 明确503，测试没有长睡眠。
+- [x] **Step 4: GREEN。** 上述测试、typecheck；断言跨 provider 网络调用时不存在未释放的订单事务，worker 关闭清理 timer。
+- [x] **Step 5: 审查并提交。** `feat: add durable integration commands and test adapters`。
 
 ## Task 6: 取消协商及安全取消转换
 
@@ -201,7 +201,7 @@ expect(() => selectIntegration({ nodeEnv: 'production', provider: 'simulated' })
 
 **Interfaces:** `OrderCancellationService.request,respond,withdraw(actor,id,input,key):Promise<OrderCommandResult>`；`begin(tx,order:LockedOrder,reason:string,actorId:string|null,now:Date):Promise<void>`、`tryFinalize(tx,orderId,now):Promise<boolean>`。begin 产生 CLOSE_PAYMENT／REFUND_PAYMENT outbox；tryFinalize 只有无交接且全部义务明确关闭／已返还时才能释放。
 
-- [ ] **Step 1: 写失败测试。** 发起人不能替对方同意、不能回应历史请求、一份未决请求、防重、拒绝／撤回、已有运单／面交禁止、审计插入后失败回滚。未创建支付单可同事务取消；已有资金或未知结果保持占用。
+- [x] **Step 1: 写失败测试。** 发起人不能替对方同意、不能回应历史请求、一份未决请求、防重、拒绝／撤回、已有运单／面交禁止、审计插入后失败回滚。未创建支付单可同事务取消；已有资金或未知结果保持占用。
 
 ```ts
 expect(agreed.body.order.status).toBe('CANCELLED'); // 无支付单、无交接的用例
@@ -210,10 +210,10 @@ expect(paidCancellation.body.order.status).toBe('CANCEL_PENDING');
 expect(await h.prisma.itemReservation.count({ where: { orderId: paidOrderId } })).toBe(6);
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-cancellation.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** 只允许 AWAITING_DETAILS／PAYMENT／FULFILLMENT 且未登记任何交接；保存每次取消历史，不续期。未决取消对支付可核对，但新发货／交接／结算被禁止。资金条件由数据库事实而非按钮决定；退款回执尚未实现前，已付取消保持 CANCEL_PENDING，不提前显示取消成功。
-- [ ] **Step 4: GREEN。** 上述测试及 conversion 回归，数据库部分唯一和 execute 版本策略覆盖并发同意／撤回。
-- [ ] **Step 5: 审查并提交。** `feat: negotiate safe order cancellation`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-cancellation.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** 只允许 AWAITING_DETAILS／PAYMENT／FULFILLMENT 且未登记任何交接；保存每次取消历史，不续期。未决取消对支付可核对，但新发货／交接／结算被禁止。资金条件由数据库事实而非按钮决定；退款回执尚未实现前，已付取消保持 CANCEL_PENDING，不提前显示取消成功。
+- [x] **Step 4: GREEN。** 上述测试及 conversion 回归，数据库部分唯一和 execute 版本策略覆盖并发同意／撤回。
+- [x] **Step 5: 审查并提交。** `feat: negotiate safe order cancellation`。
 
 ## Task 7: 双方付款、可信资金事件与取消退款
 
@@ -223,7 +223,7 @@ expect(await h.prisma.itemReservation.count({ where: { orderId: paidOrderId } })
 
 **Interfaces:** `PaymentsService.start(actor,id,input,key):Promise<OrderCommandResult>`、`checkout(actor,id,intentId):Promise<CheckoutView>`；`PaymentEventsService.applyVerified(event:VerifiedIntegrationEvent):Promise<void>`；`PaymentOutboxHandler` 实现任务5 handler。测试 `POST /api/testing/payments/:intentId/complete` 仅纯CUSTOMER本人，要求 Idempotency-Key／订单 expectedVersion，固定模拟成功金额从 intent 推导；先改变独立模拟外部事实，再经可信事件处理，审计失败可核对恢复。
 
-- [ ] **Step 1: 写失败测试。** 双1000分保证金及必要差价方向；零差价无义务；金额／币种／签名／关联错误不放行，未知可信业务号保留隔离事件；重复／乱序／晚到成功、跨用户checkout与跨订单幂等；外部成功后审计失败重跑只一份资金确认。
+- [x] **Step 1: 写失败测试。** 双1000分保证金及必要差价方向；零差价无义务；金额／币种／签名／关联错误不放行，未知可信业务号保留隔离事件；重复／乱序／晚到成功、跨用户checkout与跨订单幂等；外部成功后审计失败重跑只一份资金确认。
 
 ```ts
 expect(intent.amountFen).toBe(1000);
@@ -232,10 +232,10 @@ expect(await h.prisma.financialEntry.count({ where: { intentId, entryType: 'PAYM
 expect(cancelled.status).not.toBe('AWAITING_FULFILLMENT');
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-payments.e2e-spec.ts payment-events.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** 唯一付款义务／业务号，only purpose 输入；创建意图及 CREATE_PAYMENT 任务同审计事务，checkout不创建意图。可信结果先解析关联，再锁订单、去重、验证固定金额并写不可变资金记录；全部条件满足且未过支付期限、无取消／hold 才启动共同72小时履约。过期成功使用 cancellation.begin；CANCEL_PENDING 晚到成功补退款，ON_HOLD 只保留资金事实和异常待办，不擅自释放资金／占用；close／refund 回执确认后才调用 tryFinalize，未知保留占用，矛盾终态写异常待办不覆盖新占用。模拟签名密钥通过约定环境变量注入，生产不注册 testing 路由。
-- [ ] **Step 4: GREEN。** 付款、事件、取消与outbox全量；人为让 AuditService 先真实插入后抛错，确认模拟外部成功保留、订单／资金／audit回滚，query重试可恢复且不再 execute。
-- [ ] **Step 5: 审查并提交。** `feat: coordinate order funding and cancellation refunds`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-payments.e2e-spec.ts payment-events.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** 唯一付款义务／业务号，only purpose 输入；创建意图及 CREATE_PAYMENT 任务同审计事务，checkout不创建意图。可信结果先解析关联，再锁订单、去重、验证固定金额并写不可变资金记录；全部条件满足且未过支付期限、无取消／hold 才启动共同72小时履约。过期成功使用 cancellation.begin；CANCEL_PENDING 晚到成功补退款，ON_HOLD 只保留资金事实和异常待办，不擅自释放资金／占用；close／refund 回执确认后才调用 tryFinalize，未知保留占用，矛盾终态写异常待办不覆盖新占用。模拟签名密钥通过约定环境变量注入，生产不注册 testing 路由。
+- [x] **Step 4: GREEN。** 付款、事件、取消与outbox全量；人为让 AuditService 先真实插入后抛错，确认模拟外部成功保留、订单／资金／audit回滚，query重试可恢复且不再 execute。
+- [x] **Step 5: 审查并提交。** `feat: coordinate order funding and cancellation refunds`。
 
 ## Task 8: 双向快递、可信物流与面交
 
@@ -245,7 +245,7 @@ expect(cancelled.status).not.toBe('AWAITING_FULFILLMENT');
 
 **Interfaces:** `ShipmentsService.submit(actor,id,input,key):Promise<OrderCommandResult>`；`LogisticsEventsService.applyVerified(event):Promise<void>`；`OrderHandoverService.confirm(actor,id,input,key):Promise<OrderCommandResult>`；LogisticsOutboxHandler 实现任务5接口。模拟 `POST /api/testing/shipments/:shipmentId/progress` 只自己的出件，expectedVersion／幂等，progress=COLLECTED|DELIVERED|EXCEPTION，经模拟适配器可信事件路径；DELIVERED 不能由该驱动跳过 COLLECTED。
 
-- [ ] **Step 1: 写失败测试。** 资金不齐、未决取消、错模式／身份、重复规范化运单、漏件输入、无揽收不运输；双方共截止、乱序事件、先收到一方独立截止、异常不恢复；面交单方不代对方、首次交接后不能安全取消。
+- [x] **Step 1: 写失败测试。** 资金不齐、未决取消、错模式／身份、重复规范化运单、漏件输入、无揽收不运输；双方共截止、乱序事件、先收到一方独立截止、异常不恢复；面交单方不代对方、首次交接后不能安全取消。
 
 ```ts
 expect(submitted.body.order.status).toBe('AWAITING_FULFILLMENT');
@@ -254,10 +254,10 @@ expect((await cancelAfterTracking()).body.code).toBe('ORDER_FULFILLMENT_STARTED'
 expect(await incomingDeadlineMinusDelivered()).toBe(72 * 60 * 60 * 1000);
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-fulfillment.e2e-spec.ts logistics-events.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** 运单绑定自己的整侧快照及冻结地址引用，outbox不包含明文；登记即取消保护，可信揽收／签收分开。两边揽收进入运输；有单侧来件签收即建立该侧验收截止，双方到达进入待验收。验收期限使用服务端接受可信签收的 Clock.now 起算，保留 occurredAt 作为外部事实，不让外部未来时间延长期限。面交两侧各自确认，双方完成后才建立双方来件验收状态；从不调用物流适配器。期限边界先拒绝，不靠可信事件晚到恢复hold。
-- [ ] **Step 4: GREEN。** 上述测试及取消／资金回归；确认外部物流调用在业务事务之外、错误／重复事件不新增进度审计。
-- [ ] **Step 5: 审查并提交。** `feat: track dual shipments and in-person handover`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-fulfillment.e2e-spec.ts logistics-events.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** 运单绑定自己的整侧快照及冻结地址引用，outbox不包含明文；登记即取消保护，可信揽收／签收分开。两边揽收进入运输；有单侧来件签收即建立该侧验收截止，双方到达进入待验收。验收期限使用服务端接受可信签收的 Clock.now 起算，保留 occurredAt 作为外部事实，不让外部未来时间延长期限。面交两侧各自确认，双方完成后才建立双方来件验收状态；从不调用物流适配器。期限边界先拒绝，不靠可信事件晚到恢复hold。
+- [x] **Step 4: GREEN。** 上述测试及取消／资金回归；确认外部物流调用在业务事务之外、错误／重复事件不新增进度审计。
+- [x] **Step 5: 审查并提交。** `feat: track dual shipments and in-person handover`。
 
 ## Task 9: 双方验收、异常锁定与最终结算
 
@@ -271,7 +271,7 @@ SettlementService.begin 使用 supplied tx，锁订单的调用者拥有一次�
 
 任务9全量验证补充：既有 persistence 独立服务测试先显式 `$connect()` 和无副作用 `SELECT 1`，再执行原业务事务／断言，并沿用 finally 断开。两次正常全量运行暴露其首次冷连接进入 transaction-start 时限，单文件诊断通过；`$connect()` 初始化引擎／连接池，不保证已建立物理连接，因此健康查询属于测试准备。不得通过修改生产代码、超时、并发或跳过测试掩盖该问题。
 
-- [ ] **Step 1: 写失败测试。** 自己来件未到／已逾期拒绝，不能代对方；双方验收才SETTLING；零差价无结算任务；部分／UNKNOWN不能完成、重复保证金返还不重复；异议锁定与验收／worker竞争；审计失败回滚最终下架与释放。
+- [x] **Step 1: 写失败测试。** 自己来件未到／已逾期拒绝，不能代对方；双方验收才SETTLING；零差价无结算任务；部分／UNKNOWN不能完成、重复保证金返还不重复；异议锁定与验收／worker竞争；审计失败回滚最终下架与释放。
 
 ```ts
 expect(afterFirstAccepted.status).not.toBe('SETTLING');
@@ -281,10 +281,10 @@ expect(await originalItemStatuses()).toEqual(Array(6).fill('INACTIVE'));
 expect(await originalOwners()).toEqual(beforeOwners);
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-settlement.e2e-spec.ts order-issues.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** 只在自己可信收到且期限有效、无取消／hold时验收；先到的一方可以独立验收。双方验收原子产生差价结算和两份保证金全额返还任务；与取消共享唯一返还义务，防止双退。worker发新任务前重验状态，已在途结果继续核对但不另建号。全部确认才能完成、原物品INACTIVE／修订递增／释放；矛盾及异议锁定，无运营解锁／裁决入口。
-- [ ] **Step 4: GREEN。** 结算／异议、资金事件与物流回归；真实资金记录不可变测试通过，completed／cancelled旧事件不倒退。
-- [ ] **Step 5: 审查并提交。** `feat: finalize exchange acceptance and settlement`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-settlement.e2e-spec.ts order-issues.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** 只在自己可信收到且期限有效、无取消／hold时验收；先到的一方可以独立验收。双方验收原子产生差价结算和两份保证金全额返还任务；与取消共享唯一返还义务，防止双退。worker发新任务前重验状态，已在途结果继续核对但不另建号。全部确认才能完成、原物品INACTIVE／修订递增／释放；矛盾及异议锁定，无运营解锁／裁决入口。
+- [x] **Step 4: GREEN。** 结算／异议、资金事件与物流回归；真实资金记录不可变测试通过，completed／cancelled旧事件不倒退。
+- [x] **Step 5: 审查并提交。** `feat: finalize exchange acceptance and settlement`。
 
 ## Task 10: 共同到期转换、定时执行与并发裁决
 
@@ -302,7 +302,7 @@ expect(await originalOwners()).toEqual(beforeOwners);
 
 详情／列表／独立收货资料 GET 先核验纯客户与参与身份，再在读快照之外完成清理并重新读取；列表在清理后应用状态筛选／游标。checkout 保留外部读取前后付款人校验，过期错误退出事务后清理；已有 IN_PROGRESS 驱动仅能核对已保存事实，不准新发送。扫描器每60秒、同实例共用在途 Promise，销毁清除定时器并等待在途任务；确定性 phase3 harness 及独立应用组合禁用自动扫描。Task6 三个锁后逾期测试升级为原409／无失败缓存加独立系统 CANCEL_PENDING v3、EXPIRED 请求、稳定关闭任务及保留占用，保留原锁等待证据和超时／并发配置。
 
-- [ ] **Step 1: 写失败测试。** 四类截止的精确边界、延迟scanner、旧期限跨阶段、同键终态重放、审计插入后失败回滚；deterministic barrier证明建单／proposal取消／expire、付款／到期、运单／取消同意、验收／异议、worker／hold竞争，禁止仅Promise.all碰运气。
+- [x] **Step 1: 写失败测试。** 四类截止的精确边界、延迟scanner、旧期限跨阶段、同键终态重放、审计插入后失败回滚；deterministic barrier证明建单／proposal取消／expire、付款／到期、运单／取消同意、验收／异议、worker／hold竞争，禁止仅Promise.all碰运气。
 
 ```ts
 expect(await raceSuccessfulDecisions()).toBe(1);
@@ -311,10 +311,10 @@ expect((await originalSuccessReplay()).body).toEqual(originalSuccess.body);
 expect((await newExpiredCommand()).body.code).toBe('ORDER_EXPIRED');
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-expiry.e2e-spec.ts order-races.e2e-spec.ts`。
-- [ ] **Step 3: 最小实现。** 每60秒scanner并防同实例重入；多实例靠数据库锁与状态条件。details／payment取消，未双方揽收／交接的共同履约到期hold，尚未验收的个人deadline到期hold；旧deadline不误伤SETTLING／CANCEL_PENDING／终态。等待物品／订单锁后再读取Clock.now，所有系统转换有null actor审计，不在错误事务内丢清理。
-- [ ] **Step 4: GREEN。** 全阶段API与并发矩阵重复跑至少3次，测试无sleep等待巧合／锁泄漏；`npm run verify`，若DB阻塞明确记录而非跳过验证声明完成。
-- [ ] **Step 5: 审查并提交。** `feat: enforce order deadlines and race-safe transitions`。
+- [x] **Step 2: 观察 RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase3.config.ts order-expiry.e2e-spec.ts order-races.e2e-spec.ts`。
+- [x] **Step 3: 最小实现。** 每60秒scanner并防同实例重入；多实例靠数据库锁与状态条件。details／payment取消，未双方揽收／交接的共同履约到期hold，尚未验收的个人deadline到期hold；旧deadline不误伤SETTLING／CANCEL_PENDING／终态。等待物品／订单锁后再读取Clock.now，所有系统转换有null actor审计，不在错误事务内丢清理。
+- [x] **Step 4: GREEN。** 全阶段API与并发矩阵重复跑至少3次，测试无sleep等待巧合／锁泄漏；`npm run verify`，若DB阻塞明确记录而非跳过验证声明完成。
+- [x] **Step 5: 审查并提交。** `feat: enforce order deadlines and race-safe transitions`。
 
 ## Task 11: 小程序订单工作台
 
@@ -324,13 +324,13 @@ expect((await newExpiredCommand()).body.code).toBe('ORDER_EXPIRED');
 
 任务11复核 R1–R3：仅补充 actor／order-owned RAM 未决元数据和内部原请求重试接口、actor／order／version 表单身份及私密回调清理、最新 getMe 请求 epoch 防迟到身份变更；保持既有签名兼容与一次认证重试。新增真实同 API 实例卸载／重挂载、新版本、同版本参与方切换资料、迟到身份响应回归；共享契约、后台和持久化不更改。
 
-用户确认的额外 I1／R1 窄修复（2026-10-07）：仅在 AuthenticatedApiClient 内将认证发送结果关联实际成功请求的 Session RAM revision／epoch，getMe 绑定前拒绝已替换凭据的旧证明；认证重试使用重试本身的版本。真实 Session＋传输＋OrderApi 组合先复现恢复会话 actor=null、A 身份请求等待时 storage 换成 B、没有新 getMe 的地址写入／私有读取问题，并覆盖合法初次绑定、同用户认证及 TTL、迟到无效证明与最新读取。保留原身份、未知请求及重挂载回归与真实浏览器隐私流程，六项最终 gate 分别记录；独立复核及最终结项仍等待实际证据，不在此预先标记通过。
+用户确认的额外 I1／R1 窄修复（2026-10-07，`daa7f27`）：仅在 AuthenticatedApiClient 内将认证发送结果关联实际成功请求的 Session RAM revision／epoch，getMe 绑定前拒绝已替换凭据的旧证明；认证重试使用重试本身的版本。真实 Session＋传输＋OrderApi 组合先复现恢复会话 actor=null、A 身份请求等待时 storage 换成 B、没有新 getMe 的地址写入／私有读取问题，并覆盖合法初次绑定、同用户认证及 TTL、迟到无效证明与最新读取。保留原身份、未知请求及重挂载回归与真实浏览器隐私流程，六项最终 gate 分别通过；实际最终独立复核确认 I1／R1 已解决、无新增 Critical／Important、范围内未解决项为空，详见文末完成记录。
 
 本轮验证的单文件测试生命周期修正：真实 owned-cleanup 回归中普通 DROP 的阶段计时为 26.42 秒，加上准备超过既有 30 秒测试期限，备用清理与原 Promise 发生第二次 DROP 重叠。经控制器裁决，将该测试的真实初始化失败及完整清理置于既有 beforeAll 准备阶段，断言仍核验原失败、源环境恢复和目录实际缺席；afterAll 先等待同一 Promise，再执行普通备用清理。30 秒 test／60 秒 hook、并发、数据库 helper 与物理持久化配置均保持，失败及诊断证据保留，最终六门在此修正后重新独立执行。
 
 **Interfaces:** OrderApi `convertProposal,listMyOrders,getOrder,saveAddress,getShippingAddress,startPayment,getCheckout,submitShipment,confirmHandover,acceptOrder,reportIssue,requestCancellation,respondCancellation,withdrawCancellation` 严格映射共享schema；`runLogicalCommand(resourceId,action,input):Promise<OrderCommandResult>` 保存body／key，网络和5xx保留，确定性冲突刷新后重新确认。
 
-- [ ] **Step 1: 写失败组件／传输测试。** 真实入口、双方进度、模拟提示、自己的动作、资料／付款pending、快递／面交条件、取消阻挡；403／409刷新、旧请求不得覆盖新结果、结果不明重复点击复用键、无完整资料响应写本地缓存。
+- [x] **Step 1: 写失败组件／传输测试。** 真实入口、双方进度、模拟提示、自己的动作、资料／付款pending、快递／面交条件、取消阻挡；403／409刷新、旧请求不得覆盖新结果、结果不明重复点击复用键、无完整资料响应写本地缓存。
 
 ```tsx
 expect(screen.getByText('测试支付／测试物流，不产生真实资金或寄递')).toBeVisible();
@@ -338,10 +338,10 @@ expect(retryHeaders['Idempotency-Key']).toBe(firstHeaders['Idempotency-Key']);
 expect(screen.queryByRole('button', { name: '确认对方收货' })).not.toBeInTheDocument();
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm test --workspace @barter/miniapp -- order-api.test.ts orders.test.tsx`。
-- [ ] **Step 3: 最小实现。** Taro组件与原session；资金状态只信API，测试付款／物流操作仅显式acceptance或development构建且API声明simulation时显示，生产flag拒绝。资料仅即时展示，不存session／日志。后端未实现真实付款时显示不可用，不假装调用微信支付成功；新增“我的订单”和转换后入口。
-- [ ] **Step 4: GREEN。** 上述测试、全部miniapp测试、typecheck、`npm run build:weapp --workspace @barter/miniapp`；设置 TARO_APP_IDENTITY_PROVIDER=acceptance、TARO_APP_ENVIRONMENT=acceptance、TARO_APP_INTEGRATION_MODE=simulated 后运行 `npm run build:h5 --workspace @barter/miniapp`，命令后恢复原环境。新页没有越权按钮不代表省略API越权测试。
-- [ ] **Step 5: 审查并提交。** `feat: add miniapp order fulfillment workbench`。
+- [x] **Step 2: 观察 RED。** `npm test --workspace @barter/miniapp -- order-api.test.ts orders.test.tsx`。
+- [x] **Step 3: 最小实现。** Taro组件与原session；资金状态只信API，测试付款／物流操作仅显式acceptance或development构建且API声明simulation时显示，生产flag拒绝。资料仅即时展示，不存session／日志。后端未实现真实付款时显示不可用，不假装调用微信支付成功；新增“我的订单”和转换后入口。
+- [x] **Step 4: GREEN。** 上述测试、全部miniapp测试、typecheck、`npm run build:weapp --workspace @barter/miniapp`；设置 TARO_APP_IDENTITY_PROVIDER=acceptance、TARO_APP_ENVIRONMENT=acceptance、TARO_APP_INTEGRATION_MODE=simulated 后运行 `npm run build:h5 --workspace @barter/miniapp`，命令后恢复原环境。新页没有越权按钮不代表省略API越权测试。
+- [x] **Step 5: 审查并提交。** `feat: add miniapp order fulfillment workbench`。
 
 ## Task 12: 运营订单只读 API 和响应式页面
 
@@ -351,7 +351,7 @@ expect(screen.queryByRole('button', { name: '确认对方收货' })).not.toBeInT
 
 **Interfaces:** `AdminOrdersService.list({cursor?,status?,limit?}):Promise<OrderListView>`、`detail(id):Promise<OrderView>`；GET /api/admin/orders 与 /:id，Roles OPERATIONS／REVIEWER／SUPER_ADMIN；没有POST。前端 `listOrders(query)`、`getOrder(id)` 只GET。
 
-- [ ] **Step 1: 写失败测试。** 三角色只读通过、客户403、未登录401、所有代付款／验收／取消写路由不存在；地址／checkout不泄漏，查询不触发到期变更；390px卡片和长ID无溢出，deadline只是显示。
+- [x] **Step 1: 写失败测试。** 三角色只读通过、客户403、未登录401、所有代付款／验收／取消写路由不存在；地址／checkout不泄漏，查询不触发到期变更；390px卡片和长ID无溢出，deadline只是显示。
 
 ```ts
 expect((await operatorPost(`/api/admin/orders/${orderId}/acceptance`)).status).toBe(404);
@@ -359,20 +359,20 @@ expect(JSON.stringify(operatorDetail.body)).not.toContain(address.phone);
 expect(await persistedStatusAfterOperatorGet()).toBe(beforeStatus);
 ```
 
-- [ ] **Step 2: 观察 RED。** API phase3 admin-orders 测试及 `npm test --workspace @barter/admin -- orders.test.tsx`。
-- [ ] **Step 3: 最小实现。** 独立只读service和脱敏mapper；列表统一稳定游标、状态和异常筛选；表格／手机卡片展示双方进度、资金核对／异常，不提供代操作、强制完成、直接退款或地址导出。
-- [ ] **Step 4: GREEN。** API权限、admin组件、原review／proposal回归、admin构建；手机真实浏览器检验留任务13。
-- [ ] **Step 5: 审查并提交。** `feat: add responsive read-only order operations`。
+- [x] **Step 2: 观察 RED。** API phase3 admin-orders 测试及 `npm test --workspace @barter/admin -- orders.test.tsx`。
+- [x] **Step 3: 最小实现。** 独立只读service和脱敏mapper；列表统一稳定游标、状态和异常筛选；表格／手机卡片展示双方进度、资金核对／异常，不提供代操作、强制完成、直接退款或地址导出。
+- [x] **Step 4: GREEN。** API权限、admin组件、原review／proposal回归、admin构建；手机真实浏览器检验留任务13。
+- [x] **Step 5: 审查并提交。** `feat: add responsive read-only order operations`。
 
 ## Task 13: 双用户验收、CI、文档与整分支审查
 
 **Files:** Create `e2e/support/orders.ts`、`two-customer-orders.spec.ts`、`order-cancellation.spec.ts`、`in-person-orders.spec.ts`、`admin-orders.spec.ts`；Modify playwright.config.ts、scripts/prepare-e2e.mjs、config/index.ts、.github/workflows/verify.yml、README.md、AGENTS.md、本规格及计划完成记录。
 
-执行细化：配置实际路径为 `e2e/playwright.config.ts`。经控制器批准，root `e2e` 直接调用完整生命周期 owner `scripts/prepare-e2e.mjs`，移除无法向父 Playwright 回传数据库／密钥环境的 `pree2e` 生命周期。复用既有命名空间数据库 fixture，只在新建独占库迁移／seed；源库只读比对。进程内一次生成 API 专属密钥，前端环境排除密钥；完整等待浏览器及其服务退出后普通 DROP，再核对目录缺席和源库迁移／全部表行数不变。参数直接转发支持单文件验收。既有 `apps/miniapp/config/index.ts` 已实现完整安全 flag 校验，本任务只连接 acceptance flag，不重复修改其策略。四条浏览器流程和 focused owner guard 的具体 RED/GREEN、失败尝试及六项 gate 见 Task 13 报告。Task 13 新代理审查、整分支审查及最终完成清单仍由控制器实际完成后更新。
+执行细化：配置实际路径为 `e2e/playwright.config.ts`。经控制器批准，root `e2e` 直接调用完整生命周期 owner `scripts/prepare-e2e.mjs`，移除无法向父 Playwright 回传数据库／密钥环境的 `pree2e` 生命周期。复用既有命名空间数据库 fixture，只在新建独占库迁移／seed；源库只读比对。进程内一次生成 API 专属密钥，前端环境排除密钥；完整等待浏览器及其服务退出后普通 DROP，再核对目录缺席和源库迁移／全部表行数不变。参数直接转发支持单文件验收。既有 `apps/miniapp/config/index.ts` 已实现完整安全 flag 校验，本任务只连接 acceptance flag，不重复修改其策略。四条浏览器流程和 focused owner guard 的具体 RED/GREEN、失败尝试及六项 gate 已由 Task 13 独立审查核对；Task 13 审查、整分支审查和实际修复复核均已完成，历史结论与最终状态见文末。
 
 **Interfaces:** e2e helper沿用两身份login、真实上传／发布／审核准备，`prepareConfirmedExchange({mode,offeredCount,differenceFen,payer})` 仅准备前置提案；订单业务动作全部通过页面。测试驱动只推进可信外部事实，不直接写DB。
 
-- [ ] **Step 1: 写四条失败Playwright流程。** 快递五换一含差价、两侧保证金、可信模拟揽收／签收、两侧验收和完成原物品不可投；未交接双方取消确认退款后重新可投；面交无运单双侧交接验收；390px运营只读。保留原三个流程，断言隔离session不共享token。
+- [x] **Step 1: 写四条失败Playwright流程。** 快递五换一含差价、两侧保证金、可信模拟揽收／签收、两侧验收和完成原物品不可投；未交接双方取消确认退款后重新可投；面交无运单双侧交接验收；390px运营只读。保留原三个流程，断言隔离session不共享token。
 
 ```ts
 await expect(initiator.getByText('已完成')).toBeVisible();
@@ -380,10 +380,10 @@ expect(await originalPublicItemStatus()).toBe(404); // 原物品已INACTIVE
 await expect(operator.getByRole('button', { name: '确认验收' })).toHaveCount(0);
 ```
 
-- [ ] **Step 2: 观察 RED。** `npm run e2e -- two-customer-orders.spec.ts order-cancellation.spec.ts in-person-orders.spec.ts admin-orders.spec.ts`，先记录页面／流程断言失败，再修连接，不把Docker或端口故障当作RED。
-- [ ] **Step 3: 最小接线及文档。** 准备步骤显式声明模拟provider／test环境和H5测试integration flag；地址与模拟签名密钥在进程或CI运行时生成并传至API，各进程一致，不写仓库。CI临时PostgreSQL角色允许新测试创建／清理自己的数据库；migration和seed非破坏性，避免重复rootreset。README说明模拟／真实边界、期限、取消保护、异常交接第四阶段、数据库隔离、密钥和既有Vitest runner事实；AGENTS新增Phase3必读文档及不可逆资金规则。记录Prisma7版本文档修正，不升级到8。
-- [ ] **Step 4: 完整GREEN与独立审查。** 分别运行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run build`、`npm run verify`、`npm run e2e`；保存各项退出码、测试数、浏览器trace及升级证据。整分支新审查代理检查需求与质量，发现问题由独立修复任务TDD并提交，再新审查；仅纯文档改动不反复重跑产品测试，行为修改必须重跑相关及最终gate。外部阻塞按实际记录，不冒称全部通过。
-- [ ] **Step 5: 提交和收尾。** `test: verify dual-user order fulfillment`。更新任务—提交—审查—验证对照及本地阻塞；按finishing-a-development-branch呈现集成选择，未获第三阶段授权不自动推送／创建PR／合并main或删分支。完成标准是受控测试闭环，不是真实资金上线。
+- [x] **Step 2: 观察 RED。** `npm run e2e -- two-customer-orders.spec.ts order-cancellation.spec.ts in-person-orders.spec.ts admin-orders.spec.ts`，先记录页面／流程断言失败，再修连接，不把Docker或端口故障当作RED。
+- [x] **Step 3: 最小接线及文档。** 准备步骤显式声明模拟provider／test环境和H5测试integration flag；地址与模拟签名密钥在进程或CI运行时生成并传至API，各进程一致，不写仓库。CI临时PostgreSQL角色允许新测试创建／清理自己的数据库；migration和seed非破坏性，避免重复rootreset。README说明模拟／真实边界、期限、取消保护、异常交接第四阶段、数据库隔离、密钥和既有Vitest runner事实；AGENTS新增Phase3必读文档及不可逆资金规则。记录Prisma7版本文档修正，不升级到8。
+- [x] **Step 4: 完整GREEN与独立审查。** 分别运行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run build`、`npm run verify`、`npm run e2e`；保存各项退出码、测试数、浏览器trace及升级证据。整分支新审查代理检查需求与质量，发现问题由独立修复任务TDD并提交，再新审查；仅纯文档改动不反复重跑产品测试，行为修改必须重跑相关及最终gate。外部阻塞按实际记录，不冒称全部通过。
+- [x] **Step 5: 提交和收尾。** `test: verify dual-user order fulfillment`。更新任务—提交—审查—验证对照及本地阻塞；按finishing-a-development-branch呈现集成选择，未获第三阶段授权不自动推送／创建PR／合并main或删分支。完成标准是受控测试闭环，不是真实资金上线。
 
 ## 规格覆盖与完成清单
 
@@ -400,6 +400,68 @@ await expect(operator.getByRole('button', { name: '确认验收' })).toHaveCount
 | 小程序／运营页面、旧刷新与不确定重试 | 11、12、13 |
 | 原三流程、新四流程、六质量门、CI与文档 | 13 |
 
-- [ ] 13项及对应新代理审查、独立提交均完成，最终整分支审查无未处理重要问题。
-- [ ] 六项检查与增量升级、权限、幂等、资金、并发和故障恢复验证通过，或明确记录本机无法解决的外部阻塞。
-- [ ] 真实服务未接入、第四阶段异常待处理和生产上线依赖明确报告，不误称第三阶段已经支持真实资金试运营。
+- [x] 13项及对应新代理审查、独立提交均完成，最终整分支审查无未处理重要问题。
+- [x] 六项检查与增量升级、权限、幂等、资金、并发和故障恢复验证通过，或明确记录本机无法解决的外部阻塞。
+- [x] 真实服务未接入、第四阶段异常待处理和生产上线依赖明确报告，不误称第三阶段已经支持真实资金试运营。
+
+## 2026-10-07 本地完成记录
+
+受控模拟订单闭环的 13 项任务已实施、单独提交并经新代理独立审查。此表保存可跟随 Git 历史核对的完成结果；任务报告／审查原文由控制器私下保留，表中的记录不是未来执行命令，不依赖忽略目录或临时辅助程序。
+
+| 任务 | 实际实施／修复提交 | 独立任务审查结果 |
+| --- | --- | --- |
+| 1 契约、规则和策略 | `96df166`、`fe0b2ae` | Approved，无 Critical／Important |
+| 2 持久化、占用和隔离库 | `97fceb1`、`12a6fdb` | 首审需修复；复核全部问题已解决、无新增 Critical／Important |
+| 3 原子建单与命令边界 | `bef5709` | Approved，无 Critical／Important |
+| 4 加密资料及授权读取 | `29fb026`、`0c4d057` | 首审需修复；转义资料往返修复后独立复核通过 |
+| 5 外部适配器和 outbox | `3d1a1fd` | 独立审查消息由控制器记录：规格符合、Approved，无 Critical／Important |
+| 6 安全取消 | `ae15825` | 独立审查消息由控制器记录：规格符合、Approved，无 Critical／Important |
+| 7 付款、资金事件及退款 | `04cf368`、`6bdaf33` | 首审需修复；新发送重新授权修复后复核 1 项解决／0 项未解决，无新增问题 |
+| 8 快递与面交 | `26981a0` | 独立审查消息由控制器记录：规格符合、Approved，无 Critical／Important |
+| 9 验收、异常与结算 | `3faba51` | 独立审查消息由控制器记录：规格符合、Approved，无 Critical／Important |
+| 10 到期与并发 | `86c2d96` | Approved，无 Critical／Important |
+| 11 小程序工作台 | `5ff64e3`、`fa805be` | 首审需修复；原请求恢复、私有状态和迟到身份 R1–R3 复核全部关闭，无新增 Critical／Important |
+| 12 运营只读页面 | `2703c07` | Approved，无 Critical／Important |
+| 13 浏览器验收、CI 配置与文档 | `879c015` | Approved，无 Critical／Important，保留加载异常和警告关注项 |
+
+Task 5／6／8／9 的来源是控制器收到各自新审查代理返回并记入进度台账的实际结论，未虚构独立报告文件。其他任务以实际审查／复核报告及台账相互核对；逐任务通过不替代整分支审查。
+
+### 整分支审查及两轮修复
+
+首次整分支审查覆盖 `1859fa4..879c015`，历史结论 **With fixes：Critical 0／Important 1／Minor 4**。I1 为自动 401 重认证跨身份重放订单命令／私有响应；M1 为未确认的模块加载失败，M2 为构建与浏览器警告，M3 为安全化错误丢失阶段，M4 为部分初始化没有完整拥有资源清理。
+
+用户授权首轮修复后提交 `a028db1`，六项独立门均退出 0，test／verify 各 598 = root 12 + admin 29 + 旧 API 137 + Phase 3 API 259 + miniapp 116 + contracts 45，E2E 8／8。其独立复核确认 M3／M4 已解决，但 I1／R1 仍为 Important 未解决：恢复会话 actor=null、A 的 `/api/me` 尚在途而凭据换为 B 时，旧证明可能错误绑定 B。598 项通过没有覆盖并证明该遗漏安全，首轮不能记为最终批准。
+
+用户随后明确授权额外窄修复 `daa7f27`，将身份证明关联到实际成功发送的凭据版本，合法重试使用重试本身的快照；12 个新组合回归加至原 13 个身份测试。纠正新断言 matcher 后的业务 RED 为 6 失败／19 通过，最小修复后 25／25 GREEN；初次含断言库 TypeError 的 7 失败／18 通过也保留，不能混称纯业务 RED。最终独立复核结论：**I1／R1 ADDRESSED，全部范围内问题已解决，无新增 Critical／Important，未解决范围内项为空**。这项最终结论不改写此前 With fixes 和首轮未解决的历史。
+
+### 最终六项独立质量门
+
+以下是最终行为提交 `daa7f27` 上的实际本地执行结果，分别完成的进程记录和输出由作者报告及独立复核交叉核对；不是本次纯文档修改重跑，也不是远程 CI 结果。
+
+| 仓库入口 | 退出码／实际结果 |
+| --- | --- |
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0，610 通过／0 失败 |
+| `npm run build` | 0，警告保留 |
+| `npm run verify` | 0，独立重复 610 项及完整 lint／typecheck／build |
+| `npm run e2e` | 0，原八条流程 8／8，拥有资源销毁及源库证明通过 |
+
+610 = root 12 + admin 29 + 旧 API 137 + Phase 3 API 259 + miniapp 128 + contracts 45。18 个 Phase 3 文件并发工作量保留；miniapp 128 为原 116 加 12 个身份关联回归。浏览器包括原三条、Task 13 四条以及首轮新增的身份／私有资料保护流程；八条的成功不意味着生成八份成功 trace。
+
+原 Task 13 的六项门各最终退出 0，569 = root 7 + admin 29 + 旧 API 137 + Phase 3 API 253 + miniapp 98 + contracts 45、E2E 7／7，是修复前的历史基线。另命名的增量升级专项 1／1 在新建独占库先部署原两迁移、保存六件租约和不可变历史，再应用订单迁移并逐项比较；它已包含在 Phase 3 总数内，不能另加一项。最新 610／8 取代历史 569／7 和 598／8 作为当前结果。
+
+### 失败记录、关注项及限度
+
+- M1 保留两次不同事件：Task 13 首次 verify 在收集时 `OrderApi is not a constructor`，556 项已通过但 13 个提案测试未收集且未进入最终构建；随后 focused 13、miniapp 98 和一次获准的原样完整 verify 569 通过。额外修复的首次全 miniapp 为 undefined `MyItemsPage`，127 通过／1 失败；同次该组件自己的 3 个测试通过。只读检查未定位原因，focused 61 和一次获准的原样完整 128 通过。后来的最终 test／verify 通过只证明这些运行未复发；两个事件没有已证共同根因或修复，未来复发须诊断。
+- 额外修复首轮最终 test 为 609 通过／1 失败，真实 owned-cleanup 测试在原 30 秒时限触发备用 DROP。一次保留原 18 文件负载的计时诊断为 258／259，测得普通 DROP 26.42 秒，加准备时间跨过测试期限，备用 DROP 在原 DROP 完成前开始。获准只纠正该测试生命周期：真实初始化失败及完整清理准备放入既有 beforeAll 60 秒 hook，测试保留失败／环境／目录缺席断言；afterAll 等待同一 Promise 后备用清理。focused 6／6 及最终六门通过，临时计时已去除；未改变 test 30 秒／hook 60 秒、连接池、并发、全局 helper 或耐久性，未确定 Windows／IO 原因。这是验证夹具纠正，不能当作身份业务 RED。
+- M2 未抑制：管理端 1,458.98 kB／1300 kB、Taro vendor 671 KiB／244 KiB、NoAsyncChunks，浏览器 Ant Design React 兼容与 Descriptions span／column 警告；颜色环境和换行信息亦保留。后续应按实际 bundle／组件原因处理，当前真实 390px 验收通过不等于无警告。
+- M3 的固定 setup／child／cleanup／proof 安全分类已解决原有限问题；旧图片清理 throwing-inner-finally 在同时失败时仍可替换更早诊断，不能声称所有错误永远聚合。数据库清理与保护证明仍执行，结果仍失败且安全分类。M4 的部分资源保留和逐项清理已获独立复核确认。
+
+### 数据库、部署和后续依赖
+
+Docker／WSL2 在本机不可用，实际测试使用官方 PostgreSQL 17.11／UTC。最终只读证明与首轮保留基线完整 JSON 比较一致：源库 `barter` 仅 `20260922164446_init`、`20260929083118_proposals` 两迁移；12 张 public 表中 AdminCredential=3、User=4、UserRole=4、_prisma_migrations=2，AuditLog、IdempotencyRecord、Item、ItemImage、ItemReservation、Proposal、ProposalVersion、ProposalVersionItem 均为 0；`remainingPhase3Databases=[]`。这是迁移／全部表计数／拥有数据库目录的证据，不是逐字节备份证明。
+
+已提交的新迁移在独占新库和增量升级库验证，源库刻意保留原两迁移，**尚未成为可运行的 Phase 3 演示／业务数据库**。未来部署必须明确选择、备份目标库，再应用已审查且已提交的迁移与运行配置；测试不会静默升级保留源库。本阶段没有长期 API／演示部署、真实资金或物流验收。本分支 GitHub CI 未远程执行，没有推送／PR／合并／部署，集成方式等待用户选择；无需依赖私有临时 helper 执行公开仓库入口。
+
+真实微信身份、生产图片存储、支付与资金路径、真实物流、地址密钥版本／轮换／恢复、第四阶段异常／售后和第五阶段上线质量门仍待各自接入与验收，不能据本阶段宣布真实资金试运营。日志、失败证据及原四份新流程成功 trace 私下保留，最终 retain-on-failure 成功运行未额外生成八份成功 trace；不提交或上传令牌、测试地址、运行凭据或 trace。
