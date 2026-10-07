@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { OrderListViewSchema, OrderViewSchema } from '@barter/contracts';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
@@ -7,7 +7,7 @@ import { createOrderHarness, type OrderHarness } from './support/order-harness.j
 
 let h: OrderHarness;
 beforeAll(async () => { h = await createOrderHarness(); });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 afterAll(async () => { await h?.close(); });
 const listPath = '/api/admin/orders';
 async function newOrder(mode: 'COURIER' | 'IN_PERSON' = 'COURIER') {
@@ -61,6 +61,8 @@ it('keeps overdue status, revisions, audit, outbox leases and reservations uncha
 });
 
 it('projects safe payment, shipment, handover, deadlines and the latest bounded cancellation', async () => {
+  vi.stubEnv('ADDRESS_ENCRYPTION_KEY_BASE64', randomBytes(32).toString('base64'));
+  vi.stubEnv('ADDRESS_ENCRYPTION_KEY_VERSION', 'admin-orders-e2e-v1');
   const order = await newOrder();
   const address = { expectedVersion: 1, recipientName: '隐私姓名', phone: '13900001234', region: '私密地区', detail: '完整私密街道门牌' };
   await h.command(h.actors.initiator, `/api/orders/${order.id}/address`, address).expect(200);

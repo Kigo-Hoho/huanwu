@@ -9,7 +9,7 @@ import { ProposalsService } from '../../src/proposals/proposals.service.js';
 let h: OrderHarness;
 beforeAll(async () => { h = await createOrderHarness(); });
 afterAll(async () => { await h?.close(); });
-afterEach(() => { vi.restoreAllMocks(); h.clock.set('2026-10-03T00:00:00.000Z'); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); h.clock.set('2026-10-03T00:00:00.000Z'); });
 
 it('rechecks expiry after waiting for sorted item locks', async () => {
   const proposal = await h.confirmedProposal();
@@ -84,6 +84,8 @@ it('allows disabled integrations with simulation=false and rejects new productio
 });
 
 it.each(['staging', undefined])('refuses simulated new conversion in environment %s', async environment => {
+  vi.stubEnv('PAYMENT_PROVIDER', 'simulated');
+  vi.stubEnv('LOGISTICS_PROVIDER', 'simulated');
   const proposal = await h.confirmedProposal(); const prior = process.env.NODE_ENV;
   try {
     if (environment === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = environment;
