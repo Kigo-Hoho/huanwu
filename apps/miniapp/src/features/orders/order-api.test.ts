@@ -89,15 +89,34 @@ describe('order transport and logical commands', () => {
     const { api, request } = harness();
     request.mockResolvedValueOnce({ statusCode: 200, data: { id: id(10), roles: ['CUSTOMER'] } }); await api.getMe();
     request.mockRejectedValueOnce(new Error('unknown')); await expect(api.saveAddress(order.id, address)).rejects.toThrow();
+    expect(api.getPendingCommand(order.id, id(10))).toEqual({ resourceId: order.id, action: 'address' });
+    expect(api.getPendingCommand(id(21), id(10))).toBeNull(); expect(api.getPendingCommand(order.id, id(11))).toBeNull();
     request.mockResolvedValueOnce({ statusCode: 200, data: { id: id(11), roles: ['CUSTOMER'] } }); await api.getMe();
+    expect(api.getPendingCommand(order.id, id(11))).toBeNull();
     await api.saveAddress(order.id, { ...address, recipientName: '测试乙' });
     expect(request.mock.lastCall![0].data.recipientName).toBe('测试乙');
     expect(request.mock.lastCall![0].header['Idempotency-Key']).not.toBe(request.mock.calls[1]![0].header['Idempotency-Key']);
+    expect(api.getPendingCommand(order.id, id(11))).toBeNull();
   });
   it('retains the same key after malformed success until a valid summary resolves the attempt', async () => {
     const { api, request } = harness(); request.mockResolvedValueOnce({ statusCode: 200, data: { order: { ...order, phone: 'private' } } });
     await expect(api.acceptOrder(order.id, { expectedVersion: 1 })).rejects.toThrow();
     await api.acceptOrder(order.id, { expectedVersion: 1 });
     expect(request.mock.calls[1]![0].header['Idempotency-Key']).toBe(request.mock.calls[0]![0].header['Idempotency-Key']);
+  });
+  it('does not let an older identity response erase the current customer unknown command', async () => {
+    const { api, request } = harness();
+    let finishA!: (value: unknown) => void;
+    request.mockReturnValueOnce(new Promise(resolve => { finishA = resolve; }));
+    const staleA = api.getMe().catch(() => undefined);
+    request.mockResolvedValueOnce({ statusCode: 200, data: { id: id(11), roles: ['CUSTOMER'] } });
+    await api.getMe();
+    request.mockRejectedValueOnce(new Error('unknown B outcome'));
+    await expect(api.saveAddress(order.id, address)).rejects.toThrow();
+    finishA({ statusCode: 200, data: { id: id(10), roles: ['CUSTOMER'] } }); expect(await staleA).toBeUndefined();
+    await api.saveAddress(order.id, address);
+    const posts = request.mock.calls.map(call => call[0]).filter(options => options.method === 'POST');
+    expect(posts).toHaveLength(2); expect(posts[1].data).toEqual(address);
+    expect(posts[1].header['Idempotency-Key']).toBe(posts[0].header['Idempotency-Key']);
   });
 });

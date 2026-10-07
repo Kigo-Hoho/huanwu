@@ -22,7 +22,8 @@ const schemas = {
 };
 export type OrderAction = keyof typeof schemas;
 const suffix = { address: 'address', payment: 'payments', shipment: 'shipments', handover: 'handover', acceptance: 'acceptance', issue: 'issue', cancellation: 'cancellation', respondCancellation: 'cancellation/respond', withdrawCancellation: 'cancellation/withdraw' };
-type Attempt = { body: string; input: unknown; key: string; inFlight?: Promise<OrderCommandResult> };
+export type PendingOrderCommand = { resourceId: string; action: OrderAction };
+type Attempt = PendingOrderCommand & { ownerOrderId: string | null; actorId: string | null; body: string; input: unknown; key: string; inFlight?: Promise<OrderCommandResult> };
 
 export function simulationDriversEnabled(): boolean {
   return typeof __INTEGRATION_MODE__ === 'string' && __INTEGRATION_MODE__ === 'simulated' &&
@@ -36,10 +37,13 @@ export class OrderApi {
   // Only unresolved logical commands live here. No response or private GET cache.
   private readonly attempts = new Map<string, Attempt>();
   private actorId: string | null = null;
+  private identityRead = 0;
   constructor(private readonly client: Pick<AuthenticatedApiClient, 'orderRequest' | 'authenticate' | 'getMe'>) {}
   authenticate(provider: IdentityCodeProvider) { return this.client.authenticate(provider); }
   async getMe() {
+    const read = ++this.identityRead;
     const me = await this.client.getMe();
+    if (read !== this.identityRead) throw new Error('身份读取已过期，请重新核对当前身份。');
     if (this.actorId !== null && this.actorId !== me.id) this.attempts.clear();
     this.actorId = me.id;
     return me;
@@ -67,18 +71,34 @@ export class OrderApi {
     if (checkout.paymentIntentId !== intent) throw new Error('付款响应与请求不匹配。');
     return checkout;
   }
-  runLogicalCommand(resourceId: string, action: OrderAction, input: unknown): Promise<OrderCommandResult> {
+  getPendingCommand(orderId: string, actorId: string): PendingOrderCommand | null {
+    const owner = uuid.parse(orderId);
+    if (actorId !== this.actorId) return null;
+    for (const attempt of this.attempts.values()) {
+      if (attempt.ownerOrderId === owner && attempt.actorId === actorId) return { resourceId: attempt.resourceId, action: attempt.action };
+    }
+    return null;
+  }
+  retryOriginal(orderId: string, actorId: string): Promise<OrderCommandResult> {
+    const pending = this.getPendingCommand(orderId, actorId);
+    const attempt = pending && this.attempts.get(`${pending.resourceId}:${pending.action}`);
+    if (!attempt) return Promise.reject(new Error('当前身份没有此订单的未决操作，请刷新核对。'));
+    return this.runLogicalCommand(attempt.resourceId, attempt.action, attempt.input, orderId);
+  }
+  runLogicalCommand(resourceId: string, action: OrderAction, input: unknown, ownerOrderId?: string): Promise<OrderCommandResult> {
     try {
       const id = uuid.parse(resourceId);
       const schema = schemas[action]; if (!schema) throw new Error('未知订单动作。');
       if ((action === 'testPayment' || action === 'testShipment') && !simulationDriversEnabled()) throw new Error('测试驱动未启用。');
       const parsed = schema.parse(input);
+      const owner = ownerOrderId ? uuid.parse(ownerOrderId) : action.startsWith('test') || action === 'convert' ? null : id;
       const body = JSON.stringify(parsed); const slot = `${id}:${action}`;
       let attempt = this.attempts.get(slot);
+      if (attempt && (attempt.actorId !== this.actorId || attempt.ownerOrderId !== owner)) throw new Error('未决操作不属于当前身份和订单。');
       if (attempt && attempt.body !== body) throw new Error('上次操作结果未明，请先以原资料重试并核对结果。');
       if (attempt?.inFlight) return attempt.inFlight;
       if (!attempt) {
-        attempt = { body, input: parsed, key: `order-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` };
+        attempt = { resourceId: id, action, ownerOrderId: owner, actorId: this.actorId, body, input: parsed, key: `order-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` };
         this.attempts.set(slot, attempt);
       }
       const path: OrderRequestPath = action === 'convert' ? `/api/proposals/${id}/order`

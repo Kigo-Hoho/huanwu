@@ -320,6 +320,8 @@ expect((await newExpiredCommand()).body.code).toBe('ORDER_EXPIRED');
 
 **Files:** Create `features/orders/order-api.ts`、`order-api.test.ts`；Create `pages/orders/list/index.tsx`、`detail/index.tsx`、`address-form.tsx`、`payment-actions.tsx`、`fulfillment-actions.tsx`、`orders.test.tsx`；Modify app.config.ts、globals.d.ts、lib/api-client.ts、proposal detail和mine入口、config/index.ts。
 
+任务11复核 R1–R3：仅补充 actor／order-owned RAM 未决元数据和内部原请求重试接口、actor／order／version 表单身份及私密回调清理、最新 getMe 请求 epoch 防迟到身份变更；保持既有签名兼容与一次认证重试。新增真实同 API 实例卸载／重挂载、新版本、同版本参与方切换资料、迟到身份响应回归；共享契约、后台和持久化不更改。
+
 **Interfaces:** OrderApi `convertProposal,listMyOrders,getOrder,saveAddress,getShippingAddress,startPayment,getCheckout,submitShipment,confirmHandover,acceptOrder,reportIssue,requestCancellation,respondCancellation,withdrawCancellation` 严格映射共享schema；`runLogicalCommand(resourceId,action,input):Promise<OrderCommandResult>` 保存body／key，网络和5xx保留，确定性冲突刷新后重新确认。
 
 - [ ] **Step 1: 写失败组件／传输测试。** 真实入口、双方进度、模拟提示、自己的动作、资料／付款pending、快递／面交条件、取消阻挡；403／409刷新、旧请求不得覆盖新结果、结果不明重复点击复用键、无完整资料响应写本地缓存。

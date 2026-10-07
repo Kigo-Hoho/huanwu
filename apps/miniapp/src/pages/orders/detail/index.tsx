@@ -2,7 +2,7 @@ import { OrderCancellationSchema, OrderIssueSchema, type OrderAddressView, type 
 import { Button, Image, Input, Text, View } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useEffect, useRef, useState } from 'react';
-import type { OrderAction, OrderApi } from '../../../features/orders/order-api';
+import type { OrderAction, OrderApi, PendingOrderCommand } from '../../../features/orders/order-api';
 import { ApiClientError } from '../../../lib/api-client';
 import { defaultIdentityProvider, defaultOrderApi } from '../../../lib/default-services';
 import { AddressForm } from '../address-form';
@@ -10,14 +10,13 @@ import { PaymentActions } from '../payment-actions';
 import { FulfillmentActions } from '../fulfillment-actions';
 import { activeOrder, alertRole, buttonRole, buttonDisabled, fundsReady, inputLabel, money, orderStatusLabels, pureCustomer, sideLabel, type CustomerIdentity } from '../shared';
 
-type PendingCommand = { resourceId: string; action: OrderAction; input: unknown };
 export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurrentInstance().router?.params.id ?? '' }: { api?: OrderApi; orderId?: string }) {
   const [order, setOrder] = useState<OrderView | null>(null); const current = useRef<OrderView | null>(null);
   const [me, setMe] = useState<CustomerIdentity | null>(null); const [busy, setBusy] = useState(false);
   const identity = useRef<string | null>(null);
   const [error, setError] = useState(''); const [reason, setReason] = useState('');
   const [address, setAddress] = useState<OrderAddressView | null>(null); const [privateBusy, setPrivateBusy] = useState(false);
-  const [unknown, setUnknown] = useState(false); const pending = useRef<PendingCommand | null>(null);
+  const [unknown, setUnknown] = useState(false); const pending = useRef<PendingOrderCommand | null>(null);
   const generation = useRef(0); const lifecycle = useRef(0); const locked = useRef(false); const alive = useRef(false);
   const apply = (incoming: OrderView) => {
     if (!alive.current || incoming.id !== orderId || (current.current && incoming.version < current.current.version)) return;
@@ -28,15 +27,18 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
     try {
       const [detail, actor] = await Promise.all([api.getOrder(orderId), api.getMe()]);
       if (alive.current && life === lifecycle.current && read === generation.current) {
-        if (identity.current !== null && identity.current !== actor.id) { pending.current = null; setUnknown(false); }
+        if (identity.current !== null && identity.current !== actor.id) {
+          generation.current += 1; pending.current = null; setUnknown(false); setReason(''); setError(''); setAddress(null); setPrivateBusy(false);
+        }
         identity.current = actor.id; setMe(actor); apply(detail);
+        pending.current = api.getPendingCommand(orderId, actor.id); setUnknown(!!pending.current);
       }
     } catch {
       if (alive.current && life === lifecycle.current && read === generation.current) { setMe(null); setError('订单刷新失败，请核对登录身份后重试。'); }
     }
   };
   useEffect(() => {
-    alive.current = true; const life = ++lifecycle.current; locked.current = false; setBusy(false); current.current = null; setOrder(null); setMe(null); setAddress(null); pending.current = null; setUnknown(false);
+    alive.current = true; const life = ++lifecycle.current; locked.current = false; setBusy(false); current.current = null; setOrder(null); setMe(null); setReason(''); setAddress(null); pending.current = null; setUnknown(false);
     void api.authenticate(defaultIdentityProvider).then(() => { if (alive.current && life === lifecycle.current) return refresh(); }).catch(() => { if (alive.current && life === lifecycle.current) setError('登录失败，请重新进入订单。'); });
     return () => { alive.current = false; generation.current += 1; lifecycle.current += 1; };
   }, [api, orderId]);
@@ -46,9 +48,9 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
     locked.current = true; generation.current += 1; setBusy(true); setAddress(null); setError(''); setPrivateBusy(false);
     const life = lifecycle.current;
     const actor = me?.id;
-    const command = retry ? pending.current! : { resourceId, action, input }; pending.current = command;
+    const command = retry ? pending.current! : { resourceId, action }; pending.current = command;
     try {
-      const result = await api.runLogicalCommand(command.resourceId, command.action, command.input);
+      const result = await (retry ? api.retryOriginal(orderId, actor!) : api.runLogicalCommand(command.resourceId, command.action, input, orderId));
       if (!alive.current || life !== lifecycle.current || identity.current !== actor) return;
       apply(result.order); pending.current = null; setUnknown(false); setReason('');
       await refresh(); // Historical successful replay may be older than the current order.
@@ -65,19 +67,21 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
     } finally { if (life === lifecycle.current) { locked.current = false; if (alive.current) setBusy(false); } }
   };
   const privateReadError = (cause: unknown) => {
+    if (identity.current !== me?.id) return;
     if (cause instanceof ApiClientError && (cause.statusCode === 403 || cause.statusCode === 409)) {
       setAddress(null); setMe(null); void refresh(); setError('订单已更新，请核对后重新确认操作');
     }
   };
   const readAddress = async (side: 'self' | 'outgoing') => {
     if (privateBusy || busy) return;
-    const read = generation.current; const version = current.current?.version;
+    const read = generation.current; const version = current.current?.version; const actor = identity.current; const life = lifecycle.current;
+    const isCurrent = () => alive.current && life === lifecycle.current && generation.current === read && identity.current === actor && current.current?.version === version;
     setAddress(null); setPrivateBusy(true);
     try {
       const result = await api.getShippingAddress(orderId, side);
-      if (alive.current && generation.current === read && current.current?.version === version) setAddress(result);
-    } catch (cause) { if (alive.current && generation.current === read) { setError('资料读取失败，请刷新订单核对。'); privateReadError(cause); } }
-    finally { if (alive.current && generation.current === read) setPrivateBusy(false); }
+      if (isCurrent()) setAddress(result);
+    } catch (cause) { if (isCurrent()) { setError('资料读取失败，请刷新订单核对。'); privateReadError(cause); } }
+    finally { if (isCurrent()) setPrivateBusy(false); }
   };
   const own = order?.parties.find(p => p.userId === me?.id);
   const customer = pureCustomer(me) && !!own;
@@ -90,7 +94,7 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
     <Text>交换订单</Text>
     <Button {...buttonRole} disabled={busy} onClick={() => { if (!locked.current) void refresh(); }}>刷新订单</Button>
     {error && <Text {...alertRole}>{error}</Text>}
-    {unknown && customer && <Button {...buttonRole} disabled={busy} onClick={() => { if (pending.current) void run(pending.current.action, pending.current.input, pending.current.resourceId, true); }}>重试原操作</Button>}
+    {unknown && customer && <Button {...buttonRole} disabled={busy} onClick={() => { if (pending.current) void run(pending.current.action, undefined, pending.current.resourceId, true); }}>重试原操作</Button>}
     {!order ? <Text>加载订单中</Text> : <View>
       <Text>{orderStatusLabels[order.status]}</Text><Text>订单版本：{order.version}</Text><Text>订单号：{order.id}</Text>
       {order.simulation && <Text>测试支付／测试物流，不产生真实资金或寄递</Text>}
@@ -118,12 +122,12 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
       {order.fulfillmentDeadline && <Text>共同履约截止：{order.fulfillmentDeadline}</Text>}
       <Text>创建时间：{order.createdAt} · 更新时间：{order.updatedAt}</Text>
       {order.cancellation && <Text>取消请求：{sideLabel(order.cancellation.requestedBySide)} · {order.cancellation.status} · {order.cancellation.reason}</Text>}
-      {actions && order.status === 'AWAITING_DETAILS' && <AddressForm key={order.version} version={order.version} busy={busy} onSave={input => run('address', input)} />}
+      {actions && order.status === 'AWAITING_DETAILS' && <AddressForm key={`${order.id}:${me?.id}:${order.version}`} version={order.version} busy={busy} onSave={input => run('address', input)} />}
       {customer && own?.addressReady && <Button {...buttonRole} disabled={busy || privateBusy} onClick={() => { void readAddress('self'); }}>查看我的收货资料</Button>}
       {actions && !cancellation && order.terms.deliveryMode === 'COURIER' && ['AWAITING_FULFILLMENT', 'IN_TRANSIT', 'AWAITING_ACCEPTANCE'].includes(order.status) && fundsReady(order) && <Button {...buttonRole} disabled={busy || privateBusy} onClick={() => { void readAddress('outgoing'); }}>查看我的去件收货资料</Button>}
       {address && <View><Text>即时收货资料：{address.recipientName} · {address.phone} · {address.region} · {address.detail}</Text><Button {...buttonRole} onClick={() => setAddress(null)}>隐藏收货资料</Button></View>}
-      {actions && own && order.status === 'AWAITING_PAYMENT' && <PaymentActions key={order.version} order={order} own={own} busy={busy} api={api} onCommand={run} onReadError={privateReadError} />}
-      {actions && own && !cancellation && ['AWAITING_FULFILLMENT', 'IN_TRANSIT', 'AWAITING_ACCEPTANCE'].includes(order.status) && <FulfillmentActions key={order.version} order={order} own={own} busy={busy} onCommand={run} />}
+      {actions && own && order.status === 'AWAITING_PAYMENT' && <PaymentActions key={`${order.id}:${me?.id}:${order.version}`} order={order} own={own} busy={busy} api={api} onCommand={run} onReadError={privateReadError} />}
+      {actions && own && !cancellation && ['AWAITING_FULFILLMENT', 'IN_TRANSIT', 'AWAITING_ACCEPTANCE'].includes(order.status) && <FulfillmentActions key={`${order.id}:${me?.id}:${order.version}`} order={order} own={own} busy={busy} onCommand={run} />}
       {actions && !cancellation && (safeCancel || !!own?.incomingDeliveredAt && !own.acceptedAt) && <View>
         <Text>操作原因</Text><Input {...inputLabel('操作原因')} value={reason} disabled={busy} onInput={e => setReason(e.detail.value)} />
         {safeCancel && <Button {...buttonRole} {...buttonDisabled(busy || !cancelInput?.success)} disabled={busy || !cancelInput?.success} onClick={() => { if (!busy && cancelInput?.success) void run('cancellation', cancelInput.data); }}>申请取消订单</Button>}

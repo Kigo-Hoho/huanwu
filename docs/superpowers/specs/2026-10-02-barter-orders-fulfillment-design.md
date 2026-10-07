@@ -290,6 +290,8 @@ Taro 提案详情增加“生成交换订单”及转换后订单入口，“我
 
 模拟前端构建默认 disabled。development 模拟必须显式声明 TARO_APP_ENVIRONMENT=development 且实际 NODE_ENV 非 production；生产标志不能靠声明 development 绕过。优化的 NODE_ENV=production 模拟编译仅允许 TARO_APP_ENVIRONMENT=acceptance、TARO_ENV=h5、TARO_APP_IDENTITY_PROVIDER=acceptance 的完整显式测试组合，且仍需 API simulation=true 才显示自己的测试驱动。
 
+任务11复核修正：未决命令仅在原 RAM ledger 中按当前 actor 和所属 order 绑定；`getPendingCommand(orderId,actorId)` 只返回资源／动作元数据，`retryOriginal(orderId,actorId)` 在内部复用原规范 body／key，页面重挂载也不丢失恢复入口。测试付款／物流资源由调用者明确绑定所属订单；原方法签名兼容，仅专用逻辑执行器增加可选所属订单上下文。用户变化时资料、付款／履约表单和私密读取回调以 actor／order／version 隔离，原因清空；迟到的身份读取按最新请求 epoch 拒绝，不返回旧身份或清除当前未决 ledger。无新增会话、存储或完成历史。
+
 按钮禁用不是权限边界。网络结果未知时保留原逻辑幂等键；版本冲突刷新并要求重新确认。异步旧读取不能覆盖较新的命令结果。支付页面“已点击付款”不等于资金成功；订单刷新只依据 API 可信状态。异常和资金核对中应显示明确原因，不提供绕过步骤的完成按钮。
 
 运营工作台增加桌面表格、手机卡片的订单列表和只读详情，展示双方进度、脱敏资料、资金任务和异常待办。长标识正常换行，390px 无横向溢出。保留原审核及提案页面；无代付、代验收、改状态、直接退款按钮或隐藏管理路由。
