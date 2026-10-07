@@ -20,7 +20,12 @@ it('loads order relations in a transaction without overlapping pg queries', asyn
 it('returns one consistent revision when a command commits between order and relation reads', async () => {
   const { order } = (await h.convert(await h.confirmedProposal()).expect(201)).body;
   const original = reader.readOrder;
-  vi.spyOn(reader, 'readOrder').mockImplementationOnce(async (tx, id) => {
+  let injections = 0;
+  vi.spyOn(reader, 'readOrder').mockImplementation(async (tx, id) => {
+    // Preliminary authorization/expiry reads are not the returned snapshot.
+    const [isolation] = await tx.$queryRaw<{ transaction_isolation: string }[]>`SHOW transaction_isolation`;
+    if (injections !== 0 || id !== order.id || isolation!.transaction_isolation !== 'repeatable read') return original(tx, id);
+    injections++;
     // Real first read establishes the snapshot before another transaction commits.
     await tx.order.findUniqueOrThrow({ where: { id } });
     await h.prisma.$transaction(async writer => {
@@ -30,6 +35,7 @@ it('returns one consistent revision when a command commits between order and rel
     return original(tx, id);
   });
   const view = OrderViewSchema.parse((await h.get(h.actors.initiator, `/api/orders/${order.id}`).expect(200)).body);
+  expect(injections).toBe(1);
   expect(view.version).toBe(1); expect(view.parties.find(party => party.side === 'INITIATOR')!.addressReady).toBe(false);
   expect((await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } })).version).toBe(2);
 });

@@ -10,6 +10,7 @@ import type { IdempotencyRecord, Prisma } from '../generated/prisma/client.js';
 import { dueDeadline } from './order-policy.js';
 import { mapOrder, type LockedOrder, type OrderTx } from './order.mapper.js';
 import { readOrder } from './order-reader.js';
+import { OrderExpiryService } from './order-expiry.service.js';
 export type { LockedOrder, OrderTx } from './order.mapper.js';
 
 export interface OrderCommandContext { actor: AuthenticatedUser; id: string; input: OrderCommandInput; key: string; commandName: string; requestId?: string; admissionIntentId?: string; admissionShipmentId?: string }
@@ -29,7 +30,7 @@ export function uniqueConflict(error: unknown): boolean { return typeof error ==
 
 @Injectable()
 export class OrderCommandsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(AuditService) private readonly audit: AuditService, @Inject(CLOCK) private readonly clock: Clock) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(AuditService) private readonly audit: AuditService, @Inject(CLOCK) private readonly clock: Clock, @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService) {}
   async execute(context: OrderCommandContext, mutate: OrderMutation): Promise<OrderCommandResult> {
     const { actor, id, input, key, commandName, requestId } = context;
     assertPureCustomer(actor);
@@ -66,6 +67,9 @@ export class OrderCommandsService {
         return result;
       });
     } catch (error) {
+      // The rejected command (including its provisional idempotency row) has
+      // rolled back before this independent system transition is committed.
+      if (error instanceof ConflictException && (error.getResponse() as { code?: string }).code === 'ORDER_EXPIRED') { await this.expiry.reconcile(id); throw error; }
       if (!uniqueConflict(error)) throw error;
       const order = await readOrder(this.prisma, id);
       assertOrderParticipant(order, actor.id);

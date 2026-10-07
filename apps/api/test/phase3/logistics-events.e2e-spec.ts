@@ -14,6 +14,7 @@ import { AppModule } from '../../src/app.module.js';
 import { Test } from '@nestjs/testing';
 import { LocalImageStorageAdapter } from '../../src/storage/local-image-storage.adapter.js';
 import { ProposalExpiryScheduler } from '../../src/proposals/proposal-expiry.scheduler.js';
+import { OrderExpiryScheduler } from '../../src/orders/order-expiry.scheduler.js';
 import { configureApp } from '../../src/main.js';
 import request from 'supertest';
 import { Client } from 'pg';
@@ -175,7 +176,7 @@ it.each(['disabled', 'production', 'static'] as const)('does not register logist
   const previous = { NODE_ENV: process.env.NODE_ENV, LOGISTICS_PROVIDER: process.env.LOGISTICS_PROVIDER, WECHAT_IDENTITY_PROVIDER: process.env.WECHAT_IDENTITY_PROVIDER };
   process.env.NODE_ENV = mode === 'production' ? 'production' : 'test'; process.env.LOGISTICS_PROVIDER = mode === 'static' ? 'simulated' : 'disabled'; process.env.WECHAT_IDENTITY_PROVIDER = 'wechat';
   try {
-    const module = await Test.createTestingModule({ imports: [mode === 'static' ? AppModule : AppModule.forEnvironment()] }).overrideProvider(LocalImageStorageAdapter).useValue({}).overrideProvider(OutboxWorker).useValue({}).overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
+    const module = await Test.createTestingModule({ imports: [mode === 'static' ? AppModule : AppModule.forEnvironment()] }).overrideProvider(LocalImageStorageAdapter).useValue({}).overrideProvider(OutboxWorker).useValue({}).overrideProvider(ProposalExpiryScheduler).useValue({}).overrideProvider(OrderExpiryScheduler).useValue({}).compile();
     const app = module.createNestApplication(); configureApp(app); await app.init();
     try { await request(app.getHttpServer()).post(driver(randomUUID())).send({ expectedVersion: 1, progress: 'COLLECTED' }).expect(404); } finally { await app.close(); }
   } finally { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }

@@ -286,9 +286,19 @@ expect(await originalOwners()).toEqual(beforeOwners);
 
 ## Task 10: 共同到期转换、定时执行与并发裁决
 
+恢复验证时发现 order-payments 的 disabled-provider 辅助应用读取现实日期，而订单来自固定2026-10-03测试Clock；现实到2026-10-07后先触发409到期而非原503禁用断言。仅让该辅助应用复用同一 h.clock，保留503／404与production-disabled断言，不改生产Clock、订单期限、超时或无关物流夹具。
+
 **Files:** Create `orders/order-expiry.service.ts`、`order-expiry.scheduler.ts`；Modify commands／orders service、payment／logistics events、modules；Create `test/phase3/order-expiry.e2e-spec.ts`、`order-races.e2e-spec.ts`。
 
 **Interfaces:** `OrderExpiryService.reconcile(id:string):Promise<boolean>`、`reconcileDue():Promise<void>`；`OrderExpiryScheduler.tick():Promise<void>`。reconcile 先锁订单重读，调用 cancellation.begin 或 hold.enter，不复制状态机。用户GET核验参与身份后reconcile；运营GET不触发；命令遇到到期先回滚自身、独立reconcile，再返回409。
+
+任务10实施细化：为避免 Commands→Expiry→Cancellation→Commands 的运行时依赖环，将已有 begin／tryFinalize 及其私有辅助方法机械移入唯一内部 `orders/order-cancellation-engine.service.ts`；OrderCancellationService 保留原公开接口并委托，取消业务规则不复制、不改变。Expiry 直接注入内部 engine。新增内部 `reconcileLocked(tx,orderId):Promise<boolean>` 供已持订单→排序物品／占用→资金及所需关联锁的事件／worker 使用，重读订单和 Clock，不开事务、不增 revision；公共 reconcile 自开短事务，仅真实到期转换增一次。begin 内部快速终结不增 revision，公共 tryFinalize true 自有一次终态 revision 的契约继续保持。
+
+既有 orders-query／order-address 两个并发快照测试保留原响应与最终数据库断言，只将真实并发 writer 从首个 readOrder 调用定位到同资源最终 RepeatableRead 事务（同事务 SHOW transaction_isolation，恰好执行一次），避免新增的前置授权／清理读改变测试所验证的快照边界。不修改测试超时、连接池、并行度或生产逻辑以适配测试。
+
+本地全量验证实测 PostgreSQL 成功 DROP DATABASE 强制全局 checkpoint，分别耗时38.376／40.093秒；迁移与clone本身已完成，失败位于测试内物理销毁。控制器批准仅将 migration-upgrade 和 persistence sibling 的成功销毁移入显式 afterAll，使用原有60秒 hook，业务测试仍30秒。保留活连接销毁拒绝、全部历史／迁移／独立性断言，关闭客户端并恢复当前fixture环境，再在teardown等待实际销毁且查询目录确认不存在；失败仍使套件失败。不得改数据库耐久性、超时、连接池、并行度或跳过测试；之前独立客户端 `$connect()` 加 `SELECT 1` 预热保持不变。
+
+详情／列表／独立收货资料 GET 先核验纯客户与参与身份，再在读快照之外完成清理并重新读取；列表在清理后应用状态筛选／游标。checkout 保留外部读取前后付款人校验，过期错误退出事务后清理；已有 IN_PROGRESS 驱动仅能核对已保存事实，不准新发送。扫描器每60秒、同实例共用在途 Promise，销毁清除定时器并等待在途任务；确定性 phase3 harness 及独立应用组合禁用自动扫描。Task6 三个锁后逾期测试升级为原409／无失败缓存加独立系统 CANCEL_PENDING v3、EXPIRED 请求、稳定关闭任务及保留占用，保留原锁等待证据和超时／并发配置。
 
 - [ ] **Step 1: 写失败测试。** 四类截止的精确边界、延迟scanner、旧期限跨阶段、同键终态重放、审计插入后失败回滚；deterministic barrier证明建单／proposal取消／expire、付款／到期、运单／取消同意、验收／异议、worker／hold竞争，禁止仅Promise.all碰运气。
 

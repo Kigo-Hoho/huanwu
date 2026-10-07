@@ -11,6 +11,7 @@ import { readOrder } from '../orders/order-reader.js';
 import { ReservationsService } from '../reservations/reservations.service.js';
 import { OrderHoldService } from '../orders/order-hold.service.js';
 import { SettlementService } from './settlement.service.js';
+import { OrderExpiryService } from '../orders/order-expiry.service.js';
 
 @Injectable()
 export class PaymentEventsService {
@@ -23,6 +24,7 @@ export class PaymentEventsService {
     @Inject(OutboxService) private readonly outbox: OutboxService,
     @Inject(OrderHoldService) private readonly hold: OrderHoldService,
     @Inject(SettlementService) private readonly settlement: SettlementService,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
     if (event.kind === 'SHIPMENT_PROGRESS') throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a financial event' });
@@ -116,8 +118,7 @@ export class PaymentEventsService {
       }
       await tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'PAID', paidAt: new Date(event.occurredAt), externalTransactionId: event.externalTransactionId } });
       order = (await readOrder(tx, intent.orderId))!;
-      if (order.status === 'AWAITING_PAYMENT' && order.paymentDeadline && now >= order.paymentDeadline) {
-        await this.cancellation.begin(tx, order, 'PAYMENT_TIMEOUT', null, now);
+      if (await this.expiry.reconcileLocked(tx, order.id)) {
         order = (await readOrder(tx, order.id))!;
       }
       if (order.status === 'CANCEL_PENDING') {

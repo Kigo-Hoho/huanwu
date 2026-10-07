@@ -7,6 +7,7 @@ import { PrismaService } from '../database/prisma.service.js';
 import { AddressCipher } from './address-cipher.js';
 import { assertOrderParticipant, OrderCommandsService } from './order-commands.service.js';
 import { readOrder } from './order-reader.js';
+import { OrderExpiryService } from './order-expiry.service.js';
 
 @Injectable()
 export class OrderAddressService {
@@ -15,6 +16,7 @@ export class OrderAddressService {
     @Inject(OrderCommandsService) private readonly commands: OrderCommandsService,
     @Inject(AddressCipher) private readonly cipher: AddressCipher,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async save(actor: AuthenticatedUser, id: string, input: OrderAddressInput, key: string, requestId?: string): Promise<OrderCommandResult> {
     assertPureCustomer(actor);
@@ -45,6 +47,8 @@ export class OrderAddressService {
   async get(actor: AuthenticatedUser, id: string, options: { side: 'self' | 'outgoing' }, requestId?: string): Promise<OrderAddressView> {
     assertPureCustomer(actor);
     if (options.side !== 'self' && options.side !== 'outgoing') throw new BadRequestException({ code: 'VALIDATION_FAILED', message: 'Invalid shipping address side' });
+    assertOrderParticipant(await readOrder(this.prisma, id), actor.id);
+    await this.expiry.reconcile(id);
     return this.prisma.$transaction(async tx => {
       const order = await readOrder(tx, id);
       assertOrderParticipant(order, actor.id);

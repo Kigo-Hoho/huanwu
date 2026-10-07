@@ -323,8 +323,14 @@ it.each(['Order', 'Item', 'PaymentIntent'] as const)('rechecks the deadline afte
     h.clock.set(created.paymentDeadline); await blocker.query('COMMIT');
     const result = await response;
     expect(result.status).toBe(409); expect(result.body.code).toBe('ORDER_EXPIRED');
-    expect((await h.prisma.order.findUniqueOrThrow({ where: { id: created.id } })).version).toBe(2);
-    expect(await h.prisma.outboxCommand.count({ where: { orderId: created.id } })).toBe(0);
+    expect(await h.prisma.order.findUniqueOrThrow({ where: { id: created.id } })).toMatchObject({ version: 3, status: 'CANCEL_PENDING' });
+    expect(await h.prisma.outboxCommand.findFirstOrThrow({ where: { orderId: created.id } })).toMatchObject({ kind: 'CLOSE_PAYMENT', businessNo: `close:${intent.id}` });
+    expect(await h.prisma.outboxCommand.count({ where: { orderId: created.id } })).toBe(1);
+    expect(await h.prisma.orderCancellation.findUniqueOrThrow({ where: { id: pending.cancellation.id } })).toMatchObject({ status: 'EXPIRED' });
+    expect(await h.prisma.itemReservation.count({ where: { orderId: created.id } })).toBe(created.items.length);
+    expect(await h.prisma.auditLog.count({ where: { entityId: created.id, action: 'ORDER_CANCEL_PENDING', actorId: null } })).toBe(1);
+    expect(await h.prisma.auditLog.count({ where: { entityId: pending.cancellation.id, action: 'ORDER_CANCELLATION_EXPIRED', actorId: null } })).toBe(1);
+    expect(await h.prisma.auditLog.count({ where: { entityId: created.id, action: 'ORDER_CANCELLATION_AGREED' } })).toBe(0);
     expect(await h.prisma.idempotencyRecord.count({ where: { key } })).toBe(0);
   } finally { await blocker.query('ROLLBACK'); await response; await blocker.end(); h.clock.set(now); }
 });

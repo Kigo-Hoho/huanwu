@@ -7,8 +7,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import type { VerifiedIntegrationEvent } from '../integrations/integration.types.js';
 import { INTEGRATION_CONFIG, type IntegrationConfiguration } from '../integrations/integration-config.js';
 import { OrderHoldService } from '../orders/order-hold.service.js';
-import { mapOrder } from '../orders/order.mapper.js';
-import { dueDeadline } from '../orders/order-policy.js';
+import { OrderExpiryService } from '../orders/order-expiry.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { ReservationsService } from '../reservations/reservations.service.js';
 
@@ -21,6 +20,7 @@ export class LogisticsEventsService {
     @Inject(INTEGRATION_CONFIG) private readonly config: IntegrationConfiguration,
     @Inject(OrderHoldService) private readonly hold: OrderHoldService,
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
     if (event.kind !== 'SHIPMENT_PROGRESS') throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a logistics event' });
@@ -30,6 +30,7 @@ export class LogisticsEventsService {
         await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${association.orderId}::uuid FOR UPDATE`;
         const order = await readOrder(tx, association.orderId); if (!order) throw new Error('Shipment order is missing');
         await this.reservations.lockItems(tx, order.items.map(item => item.itemId));
+        await tx.$queryRaw`SELECT id FROM "PaymentIntent" WHERE "orderId" = ${order.id}::uuid ORDER BY id FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM "Shipment" WHERE "orderId" = ${order.id}::uuid ORDER BY id FOR UPDATE`;
       }
       const inserted = await tx.integrationEvent.createMany({ data: [{ ...event, occurredAt: new Date(event.occurredAt), payload: event as unknown as Prisma.InputJsonObject }], skipDuplicates: true });
@@ -51,10 +52,8 @@ export class LogisticsEventsService {
       }
       await tx.shipmentEvent.create({ data: { shipmentId: shipment.id, integrationEventId: recorded.id, progress: event.progress, occurredAt: new Date(event.occurredAt), createdAt: now } });
       // Decide expiry from the current accepted facts before adding this late fact.
-      const due = dueDeadline(mapOrder(order), now);
-      let held = false;
-      if (due === 'FULFILLMENT' || due === 'INSPECTION') { await this.hold.enter(tx, order, `${due}_TIMEOUT`, now); held = true; }
-      else if (event.progress === 'EXCEPTION' && !['ON_HOLD', 'COMPLETED', 'CANCELLED'].includes(order.status)) { await this.hold.enter(tx, order, 'LOGISTICS_EXCEPTION', now); held = true; }
+      let held = await this.expiry.reconcileLocked(tx, order.id);
+      if (!held && event.progress === 'EXCEPTION' && !['ON_HOLD', 'COMPLETED', 'CANCELLED'].includes(order.status)) { await this.hold.enter(tx, order, 'LOGISTICS_EXCEPTION', now); held = true; }
       const rank = { REGISTERED: 0, COLLECTED: 1, DELIVERED: 2, EXCEPTION: 3 };
       const advanced = rank[event.progress] > rank[shipment.status];
       if (advanced) {

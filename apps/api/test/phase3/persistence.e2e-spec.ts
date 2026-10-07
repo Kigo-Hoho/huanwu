@@ -26,7 +26,15 @@ beforeAll(async () => {
     INSERT INTO "OrderItemSnapshot" (id,"orderId","itemId","ownerId",side,"sortOrder","itemVersion",title,description,"referenceValueFen",condition,"wantedText","imageUrls") VALUES ('00000000-0000-4000-8000-000000000007','${order}','${item}','${a}','INITIATOR',0,1,'snapshot','old description',1000,'GOOD','wanted',ARRAY['https://img/1','https://img/2','https://img/3']);
   `);
 });
-afterAll(async () => { await client?.end(); await database?.close(); });
+const siblings: Awaited<ReturnType<typeof createPhase3Database>>[] = [];
+afterAll(async () => {
+  try {
+    for (const sibling of siblings) {
+      await sibling.close();
+      expect((await client.query('SELECT datname FROM pg_database WHERE datname = $1', [phase3DatabaseName(sibling.url)])).rows).toHaveLength(0);
+    }
+  } finally { try { await client?.end(); } finally { await database?.close(); } }
+});
 
 it('persists all order, funds, logistics, integration and provider models', async () => {
   const { rows } = await client.query("SELECT tablename FROM pg_tables WHERE schemaname='public'");
@@ -56,14 +64,18 @@ it('keeps connection credentials out of database comparison failure diagnostics'
 it('clones independent databases and never drops a clone with a live connection', async () => {
   expect(phase3DatabaseName(process.env.DATABASE_URL!)).toBe(phase3DatabaseName(database.url));
   const sibling = await createPhase3Database();
+  siblings.push(sibling);
   const connection = new pg.Client({ connectionString: sibling.url });
-  await connection.connect();
   try {
+    await connection.connect();
     expect(phase3DatabaseName(sibling.url)).not.toBe(phase3DatabaseName(database.url));
     expect((await connection.query('SELECT count(*)::int AS count FROM "Order"')).rows[0].count).toBe(0);
     await expect(sibling.close()).rejects.toThrow(/being accessed by other users/i);
     expect((await connection.query('SELECT current_database() AS name')).rows[0].name).toBe(phase3DatabaseName(sibling.url));
-  } finally { await connection.end(); await sibling.close(); }
+  } finally {
+    try { await connection.end(); }
+    finally { process.env.DATABASE_URL = database.url; }
+  }
   expect(phase3DatabaseName(process.env.DATABASE_URL!)).toBe(phase3DatabaseName(database.url));
 });
 

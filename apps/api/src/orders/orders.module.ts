@@ -12,5 +12,8 @@ import { OrderAddressService } from './order-address.service.js';
 import { IntegrationsModule } from '../integrations/integrations.module.js';
 import { OrderCancellationService } from './order-cancellation.service.js';
 import { OrderHoldService } from './order-hold.service.js';
-@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService, OrderHoldService], exports: [OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService, OrderHoldService] })
+import { OrderCancellationEngine } from './order-cancellation-engine.service.js';
+import { OrderExpiryService } from './order-expiry.service.js';
+import { OrderExpiryScheduler } from './order-expiry.scheduler.js';
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController], providers: [OrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService, OrderCancellationEngine, OrderHoldService, OrderExpiryService, OrderExpiryScheduler], exports: [OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService, OrderHoldService, OrderExpiryService] })
 export class OrdersModule {}

@@ -15,6 +15,7 @@ import { SimulatedProviderStore } from '../integrations/simulated-provider.store
 import { SimulatedPaymentAdapter } from '../integrations/simulated-payment.adapter.js';
 import { mapOrder } from '../orders/order.mapper.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { OrderExpiryService } from '../orders/order-expiry.service.js';
 
 @Injectable()
 export class PaymentsService {
@@ -28,6 +29,7 @@ export class PaymentsService {
     @Inject(PaymentEventsService) private readonly events: PaymentEventsService,
     @Inject(SimulatedProviderStore) private readonly store: SimulatedProviderStore,
     @Inject(SimulatedPaymentAdapter) private readonly adapter: SimulatedPaymentAdapter,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   start(actor: AuthenticatedUser, id: string, input: OrderPaymentInput, key: string, requestId?: string): Promise<OrderCommandResult> {
     return this.commands.execute({ actor, id, input, key, requestId, commandName: 'START_ORDER_PAYMENT' }, async (tx, order) => {
@@ -59,6 +61,9 @@ export class PaymentsService {
       if (order.status !== 'AWAITING_PAYMENT' || !['CREATED', 'PENDING'].includes(intent.status)) throw new ConflictException({ code: 'ORDER_INVALID_STATE', message: 'Payment is not open' });
       if (order.paymentDeadline && this.clock.now() >= order.paymentDeadline) throw new ConflictException({ code: 'ORDER_EXPIRED', message: 'Payment deadline has passed' });
       return intent;
+    }).catch(async error => {
+      if (error instanceof ConflictException && (error.getResponse() as { code?: string }).code === 'ORDER_EXPIRED') await this.expiry.reconcile(id);
+      throw error;
     });
     const intent = await authorize();
     if (!this.port.checkout) throw integrationUnavailable();
@@ -88,6 +93,7 @@ export class PaymentsService {
     if (external.status === 'PENDING') {
       const denied = await this.authorizeFreshCompletion(actor, order.id, intentId);
       if (denied) {
+        if ((denied.getResponse() as { code?: string }).code === 'ORDER_EXPIRED') await this.expiry.reconcile(order.id);
         // A logical admission permits recovery, not a new effect after hold/cancel/expiry.
         // The pending snapshot may meanwhile have become a saved, reconcilable success.
         external = await this.adapter.queryPayment(intent.businessNo);

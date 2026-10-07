@@ -15,6 +15,7 @@ import { assertOrderParticipant, orderRequestHash, replayOrderCommand, uniqueCon
 import { mapOrder } from './order.mapper.js';
 import { readOrder, readOrderRelations } from './order-reader.js';
 import { testOrderRules } from './order-rules.js';
+import { OrderExpiryService } from './order-expiry.service.js';
 
 const cursorSchema = z.strictObject({ createdAt: z.iso.datetime(), id: z.string().uuid().toLowerCase() });
 const invalidQuery = () => new BadRequestException({ code: 'VALIDATION_FAILED', message: 'Invalid order query' });
@@ -36,6 +37,7 @@ export class OrdersService {
     @Inject(ProposalOrderHandoffService) private readonly handoff: ProposalOrderHandoffService,
     @Inject(ProposalsService) private readonly proposals: ProposalsService,
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async convert(actor: AuthenticatedUser, id: string, input: OrderCommandInput, key: string, requestId?: string): Promise<OrderCommandResult> {
     assertPureCustomer(actor);
@@ -97,6 +99,8 @@ export class OrdersService {
   }
   async detail(actor: AuthenticatedUser, id: string): Promise<OrderView> {
     assertPureCustomer(actor);
+    assertOrderParticipant(await readOrder(this.prisma, id), actor.id);
+    await this.expiry.reconcile(id);
     return this.prisma.$transaction(async tx => {
       const order = await readOrder(tx, id);
       assertOrderParticipant(order, actor.id);
@@ -108,6 +112,10 @@ export class OrdersService {
     const limit = query.limit ?? 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100 || (query.status !== undefined && !OrderStatusSchema.safeParse(query.status).success)) throw invalidQuery();
     const cursor = query.cursor === undefined ? undefined : decodeCursor(query.cursor);
+    // Reconcile only this participant's orders before applying status filters:
+    // an expired AWAITING_DETAILS order now belongs in the CANCELLED filter.
+    const candidates = await this.prisma.order.findMany({ where: { OR: [{ initiatorId: actor.id }, { recipientId: actor.id }], status: { in: ['AWAITING_DETAILS', 'AWAITING_PAYMENT', 'AWAITING_FULFILLMENT', 'IN_TRANSIT', 'AWAITING_ACCEPTANCE'] } }, select: { id: true } });
+    for (const candidate of candidates) await this.expiry.reconcile(candidate.id);
     return this.prisma.$transaction(async tx => {
       const orders = await tx.order.findMany({ where: {
         AND: [

@@ -13,6 +13,7 @@ import { SimulatedProviderStore } from '../integrations/simulated-provider.store
 import { OrderCommandsService, assertOrderParticipant, orderRequestHash, replayOrderCommand, uniqueConflict } from '../orders/order-commands.service.js';
 import { mapOrder } from '../orders/order.mapper.js';
 import { dueDeadline } from '../orders/order-policy.js';
+import { OrderExpiryService } from '../orders/order-expiry.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { LogisticsEventsService } from './logistics-events.service.js';
 export type ShipmentProgressInput = OrderCommandInput & { progress: Exclude<ShipmentStatus, 'REGISTERED'> };
@@ -28,6 +29,7 @@ export class ShipmentsService {
     @Inject(LogisticsEventsService) private readonly events: LogisticsEventsService,
     @Inject(SimulatedProviderStore) private readonly store: SimulatedProviderStore,
     @Inject(SimulatedLogisticsAdapter) private readonly adapter: SimulatedLogisticsAdapter,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async submit(actor: AuthenticatedUser, id: string, raw: OrderShipmentInput, key: string, requestId?: string): Promise<OrderCommandResult> {
     const input = OrderShipmentSchema.parse(raw);
@@ -70,7 +72,10 @@ export class ShipmentsService {
       (external.event.progress === input.progress || (input.progress === 'COLLECTED' && external.event.progress === 'DELIVERED'));
     if (!matches()) {
       const denied = await this.authorizeFreshProgress(actor, order.id, shipmentId, input.progress);
-      if (denied) { external = await this.adapter.queryShipment(shipment.businessNo); if (!matches()) throw denied; }
+      if (denied) {
+        if ((denied.getResponse() as { code?: string }).code === 'ORDER_EXPIRED') await this.expiry.reconcile(order.id);
+        external = await this.adapter.queryShipment(shipment.businessNo); if (!matches()) throw denied;
+      }
       else {
         if (external.status !== 'PENDING' && external.status !== 'SUCCESS') throw new ConflictException({ code: 'ORDER_INVALID_STATE', message: 'External shipment registration is not ready' });
         if (input.progress === 'DELIVERED' && (external.status !== 'SUCCESS' || external.event.kind !== 'SHIPMENT_PROGRESS' || external.event.progress !== 'COLLECTED')) throw new ConflictException({ code: 'ORDER_INVALID_STATE', message: 'Collection is required before delivery' });

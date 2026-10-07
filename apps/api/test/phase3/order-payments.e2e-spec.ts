@@ -11,7 +11,9 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module.js';
 import { LocalImageStorageAdapter } from '../../src/storage/local-image-storage.adapter.js';
 import { ProposalExpiryScheduler } from '../../src/proposals/proposal-expiry.scheduler.js';
+import { OrderExpiryScheduler } from '../../src/orders/order-expiry.scheduler.js';
 import { configureApp } from '../../src/main.js';
+import { CLOCK } from '../../src/common/clock.js';
 
 let h: OrderHarness;
 const environment = new Map<string, string | undefined>();
@@ -110,7 +112,7 @@ it.each(['test', 'production'] as const)('does not register the testing payment 
   const previous = { NODE_ENV: process.env.NODE_ENV, PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER, WECHAT_IDENTITY_PROVIDER: process.env.WECHAT_IDENTITY_PROVIDER };
   process.env.NODE_ENV = nodeEnv; process.env.PAYMENT_PROVIDER = 'disabled'; process.env.WECHAT_IDENTITY_PROVIDER = 'wechat';
   try {
-    const module = await Test.createTestingModule({ imports: [AppModule.forEnvironment()] }).overrideProvider(LocalImageStorageAdapter).useValue({}).overrideProvider(OutboxWorker).useValue({}).overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
+    const module = await Test.createTestingModule({ imports: [AppModule.forEnvironment()] }).overrideProvider(CLOCK).useValue(h.clock).overrideProvider(LocalImageStorageAdapter).useValue({}).overrideProvider(OutboxWorker).useValue({}).overrideProvider(ProposalExpiryScheduler).useValue({}).overrideProvider(OrderExpiryScheduler).useValue({}).compile();
     const app = module.createNestApplication(); configureApp(app); await app.init();
     try {
       await request(app.getHttpServer()).post(`/api/testing/payments/${randomUUID()}/complete`).send({ expectedVersion: 1 }).expect(404);

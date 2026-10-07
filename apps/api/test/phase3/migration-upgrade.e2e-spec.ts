@@ -1,9 +1,21 @@
 import pg from 'pg';
-import { expect, it } from 'vitest';
+import { afterAll, expect, it } from 'vitest';
 import { applyMigrations, createOwnedDatabase } from './support/database-fixtures.js';
 
+let database: Awaited<ReturnType<typeof createOwnedDatabase>> | undefined;
+afterAll(async () => {
+  if (!database) return;
+  // PostgreSQL DROP DATABASE forces a cluster checkpoint. Await physical
+  // disposal in the existing teardown lifecycle, after all business assertions.
+  await database.close();
+  const inspector = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await inspector.connect();
+  try { expect((await inspector.query('SELECT datname FROM pg_database WHERE datname = $1', [database.name])).rows).toHaveLength(0); }
+  finally { await inspector.end(); }
+});
+
 it('upgrades the original two migrations without changing six leases or immutable history', async () => {
-  const database = await createOwnedDatabase(process.env.DATABASE_URL!, process.env.PHASE3_NAMESPACE!);
+  database = await createOwnedDatabase(process.env.DATABASE_URL!, process.env.PHASE3_NAMESPACE!);
   const client = new pg.Client({ connectionString: database.url });
   try {
     await applyMigrations(database.url, 2);
@@ -34,5 +46,5 @@ it('upgrades the original two migrations without changing six leases or immutabl
     expect(await leases()).toEqual(originalLeases);
     expect(originalLeases).toHaveLength(6);
     await expect(client.query('UPDATE "ProposalVersion" SET "differenceFen"=1')).rejects.toThrow(/immutable/i);
-  } finally { await client.end(); await database.close(); }
+  } finally { await client.end(); }
 });

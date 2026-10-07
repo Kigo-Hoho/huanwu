@@ -11,6 +11,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { OrderCancellationService } from '../orders/order-cancellation.service.js';
 import { ReservationsService } from '../reservations/reservations.service.js';
 import { readOrder } from '../orders/order-reader.js';
+import { OrderExpiryService } from '../orders/order-expiry.service.js';
 
 @Injectable()
 export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModuleInit {
@@ -24,19 +25,26 @@ export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModu
     @Inject(INTEGRATION_CONFIG) private readonly config: IntegrationConfiguration,
     @Inject(OrderCancellationService) private readonly cancellation: OrderCancellationService,
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
+    @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   onModuleInit(): void { for (const kind of ['CREATE_PAYMENT', 'CLOSE_PAYMENT', 'REFUND_PAYMENT', 'SETTLE_DIFFERENCE'] as const) this.registry.register(kind, this); }
   async authorize(operation: ProviderOperation): Promise<boolean> {
     if (this.config.payment === 'disabled') return false;
     return this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${operation.orderId}::uuid FOR UPDATE`;
-      const order = await tx.order.findUnique({ where: { id: operation.orderId } });
+      let order = await readOrder(tx, operation.orderId);
       if (!order) return false;
       const originalNo = operation.kind === 'CREATE_PAYMENT' ? operation.businessNo : operation.payload.paymentBusinessNo;
       if (typeof originalNo !== 'string') return false;
-      await tx.$queryRaw`SELECT id FROM "PaymentIntent" WHERE "businessNo" = ${originalNo} FOR UPDATE`;
+      await this.reservations.lockItems(tx, order.items.map(item => item.itemId));
+      await tx.$queryRaw`SELECT id FROM "PaymentIntent" WHERE "orderId" = ${order.id}::uuid ORDER BY id FOR UPDATE`;
       const intent = await tx.paymentIntent.findUnique({ where: { businessNo: originalNo } });
       if (!intent || intent.orderId !== order.id || intent.amountFen !== operation.payload.amountFen || operation.payload.currency !== 'CNY') return false;
+      if (await this.expiry.reconcileLocked(tx, order.id)) {
+        await tx.order.update({ where: { id: order.id }, data: { version: { increment: 1 } } });
+        return false;
+      }
+      order = (await readOrder(tx, order.id))!;
       if (operation.kind === 'CREATE_PAYMENT') {
         if (order.status !== 'AWAITING_PAYMENT' || !['CREATED', 'PENDING'].includes(intent.status) || !order.paymentDeadline || this.clock.now() >= order.paymentDeadline) return false;
       } else {

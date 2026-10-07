@@ -151,7 +151,12 @@ it('withholds private response and rolls back an inserted access audit when audi
 });
 it('returns one authorized snapshot if funding/state changes between private read queries', async () => {
   const order = await ready(); await fundsReady(order.id); const original = reader.readOrder;
-  vi.spyOn(reader, 'readOrder').mockImplementationOnce(async (tx, id) => {
+  let injections = 0;
+  vi.spyOn(reader, 'readOrder').mockImplementation(async (tx, id) => {
+    // Exercise the final authorized response snapshot, after expiry cleanup.
+    const [isolation] = await tx.$queryRaw<{ transaction_isolation: string }[]>`SHOW transaction_isolation`;
+    if (injections !== 0 || id !== order.id || isolation!.transaction_isolation !== 'repeatable read') return original(tx, id);
+    injections++;
     await tx.order.findUniqueOrThrow({ where: { id } });
     await h.prisma.$transaction(async writer => {
       await writer.order.update({ where: { id }, data: { status: 'CANCEL_PENDING' } });
@@ -160,6 +165,7 @@ it('returns one authorized snapshot if funding/state changes between private rea
     return original(tx, id);
   });
   expect((await h.get(h.actors.initiator, `/api/orders/${order.id}/shipping-address?side=outgoing`).expect(200)).body).toMatchObject(theirs);
+  expect(injections).toBe(1);
   expect((await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('CANCEL_PENDING');
 });
 it('refuses missing encryption config without writes while preserving safe authorized replay', async () => {
