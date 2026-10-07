@@ -16,10 +16,13 @@ jobs:
     services:
       postgres:
         image: postgres:17
+        # This role belongs only to the ephemeral CI service. POSTGRES_USER is
+        # initialized with CREATE DATABASE so owned Phase 3 fixtures can clean up.
         env:
           POSTGRES_DB: barter
           POSTGRES_USER: barter
           POSTGRES_PASSWORD: barter_ci_password
+          TZ: UTC
         ports:
           - 5432:5432
         options: >-
@@ -43,6 +46,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run verify
+      # The owner generates API-only address/signing keys once per run, builds
+      # explicit acceptance H5, and migrates/seeds only a new owned database.
       - run: npm run e2e
       - uses: actions/upload-artifact@v4
         if: failure()

@@ -362,6 +362,8 @@ expect(await persistedStatusAfterOperatorGet()).toBe(beforeStatus);
 
 **Files:** Create `e2e/support/orders.ts`、`two-customer-orders.spec.ts`、`order-cancellation.spec.ts`、`in-person-orders.spec.ts`、`admin-orders.spec.ts`；Modify playwright.config.ts、scripts/prepare-e2e.mjs、config/index.ts、.github/workflows/verify.yml、README.md、AGENTS.md、本规格及计划完成记录。
 
+执行细化：配置实际路径为 `e2e/playwright.config.ts`。经控制器批准，root `e2e` 直接调用完整生命周期 owner `scripts/prepare-e2e.mjs`，移除无法向父 Playwright 回传数据库／密钥环境的 `pree2e` 生命周期。复用既有命名空间数据库 fixture，只在新建独占库迁移／seed；源库只读比对。进程内一次生成 API 专属密钥，前端环境排除密钥；完整等待浏览器及其服务退出后普通 DROP，再核对目录缺席和源库迁移／全部表行数不变。参数直接转发支持单文件验收。既有 `apps/miniapp/config/index.ts` 已实现完整安全 flag 校验，本任务只连接 acceptance flag，不重复修改其策略。四条浏览器流程和 focused owner guard 的具体 RED/GREEN、失败尝试及六项 gate 见 Task 13 报告。Task 13 新代理审查、整分支审查及最终完成清单仍由控制器实际完成后更新。
+
 **Interfaces:** e2e helper沿用两身份login、真实上传／发布／审核准备，`prepareConfirmedExchange({mode,offeredCount,differenceFen,payer})` 仅准备前置提案；订单业务动作全部通过页面。测试驱动只推进可信外部事实，不直接写DB。
 
 - [ ] **Step 1: 写四条失败Playwright流程。** 快递五换一含差价、两侧保证金、可信模拟揽收／签收、两侧验收和完成原物品不可投；未交接双方取消确认退款后重新可投；面交无运单双侧交接验收；390px运营只读。保留原三个流程，断言隔离session不共享token。
