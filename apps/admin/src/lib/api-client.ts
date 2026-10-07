@@ -1,10 +1,15 @@
 import {
   ApiErrorCodes,
   ReviewItemSchema,
+  OrderListViewSchema,
+  OrderViewSchema,
   RoleValues,
   type ApiErrorBody,
   type ItemView,
   type ProposalView,
+  type OrderListView,
+  type OrderStatus,
+  type OrderView,
   type Role,
 } from '@barter/contracts';
 
@@ -62,7 +67,13 @@ export interface ProposalReadApi {
   getProposal(id: string): Promise<ProposalView>;
 }
 
-export interface AdminApiClient extends ReviewApi, ProposalReadApi {
+export interface OrderReadQuery { cursor?: string; status?: OrderStatus; limit?: number }
+export interface OrderReadApi {
+  listOrders(query: OrderReadQuery): Promise<OrderListView>;
+  getOrder(id: string): Promise<OrderView>;
+}
+
+export interface AdminApiClient extends ReviewApi, ProposalReadApi, OrderReadApi {
   login(email: string, password: string): Promise<AuthSession>;
   bootstrapSession(): Promise<OperatorUser | null>;
   logout(): void;
@@ -278,6 +289,18 @@ export function createApiClient(options: {
 
     getProposal(id) {
       return request<ProposalView>(`/admin/proposals/${encodeURIComponent(id)}`);
+    },
+
+    async listOrders(query) {
+      const params = new URLSearchParams();
+      if (query.status !== undefined) params.set('status', query.status);
+      if (query.cursor !== undefined) params.set('cursor', query.cursor);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      return OrderListViewSchema.parse(await request<unknown>(`/admin/orders${params.size ? `?${params}` : ''}`, { method: 'GET' }));
+    },
+
+    async getOrder(id) {
+      return OrderViewSchema.parse(await request<unknown>(`/admin/orders/${encodeURIComponent(id)}`, { method: 'GET' }));
     },
 
     getReviewItem(itemId) {

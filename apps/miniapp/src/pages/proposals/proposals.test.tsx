@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ItemView, ProposalView } from '@barter/contracts';
 import { ProposalForm } from './proposal-form';
 import { ProposalDetailPage } from './detail/index';
-import { ApiClientError } from '../../lib/api-client';
+import { ApiClientError, AuthenticatedApiClient, type RequestPort } from '../../lib/api-client';
+import { Session } from '../../features/auth/session';
+import { OrderApi } from '../../features/orders/order-api';
+import { orderFixture } from '../../test/order-fixtures';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const item: ItemView = { id: id(1), ownerId: id(10), title: '我的咖啡机', description: '保存完好的咖啡机', referenceValueFen: 2000, condition: 'GOOD', imageUrls: [], wantedText: '', status: 'ACTIVE', version: 1, rejectReason: null, createdAt: '2026-09-29T00:00:00.000Z', updatedAt: '2026-09-29T00:00:00.000Z' };
@@ -11,6 +14,70 @@ const snapshot = { ...item, itemId: item.id, itemVersion: 1 };
 const proposal: ProposalView = { id: id(5), initiatorId: id(10), recipientId: id(11), responderId: id(11), status: 'PENDING', version: 3, currentVersion: 1, expiresAt: '2026-10-06T00:00:00.000Z', confirmedAt: null, reservationExpiresAt: null, createdAt: item.createdAt, updatedAt: item.updatedAt, versions: [{ id: id(6), number: 1, authorId: id(10), createdAt: item.createdAt, offeredItems: [snapshot], targetItem: { ...snapshot, itemId: id(2), ownerId: id(11), title: '对方背包' }, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 }] };
 
 describe('proposal workbench', () => {
+  it.each(['automatic-401', 'unknown-then-session-change'] as const)('clears the old conversion intent on %s and requires refreshed new-actor confirmation', async failure => {
+    const stored = new Map<string, unknown>(); let actorId = id(10); let first = true;
+    const session = new Session({ getStorageSync: k => stored.get(k), setStorageSync: (k, v) => { stored.set(k, v); }, removeStorageSync: k => { stored.delete(k); } });
+    session.setAccessToken('A', 900, id(10)); const posts: Parameters<RequestPort>[0][] = [];
+    const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
+    const request: RequestPort = async options => {
+      if (options.url.endsWith('/auth/wechat')) { actorId = id(11); return { statusCode: 201, data: { accessToken: 'B', expiresIn: 900, user: { id: actorId, roles: ['CUSTOMER'] } } }; }
+      if (options.url.endsWith('/api/me')) return { statusCode: 200, data: { id: actorId, roles: ['CUSTOMER'] } };
+      if (options.url.endsWith('/api/me/items')) return { statusCode: 200, data: [] };
+      if (options.url.endsWith('/order')) {
+        posts.push(options);
+        if (first) { first = false; if (failure === 'automatic-401') return { statusCode: 401, data: {} }; throw Error('unknown conversion'); }
+        return { statusCode: 201, data: { order: orderFixture() } };
+      }
+      return { statusCode: 200, data: confirmed };
+    };
+    const client = new AuthenticatedApiClient('http://localhost', session, request); const orderApi = new OrderApi(client);
+    render(<ProposalDetailPage api={client} orderApi={orderApi} proposalId={proposal.id} />);
+    await screen.findByRole('button', { name: '生成交换订单' }); await client.authenticate({ getCode: async () => 'B' });
+    fireEvent.click(screen.getByRole('button', { name: '生成交换订单' }));
+    if (failure === 'unknown-then-session-change') {
+      await screen.findByRole('button', { name: '重试原建单操作' });
+      act(() => { actorId = id(11); session.setAccessToken('B', 900, actorId); });
+    } else await waitFor(() => expect(session.getAccessToken()).toBe('B'));
+    expect(screen.queryByRole('button', { name: '重试原建单操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '生成交换订单' })).not.toBeInTheDocument();
+    expect(screen.queryByText('方案历史 · 第 1 版')).not.toBeInTheDocument(); expect(posts).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '刷新方案' })); await screen.findByRole('button', { name: '生成交换订单' });
+    expect(posts).toHaveLength(1); fireEvent.click(screen.getByRole('button', { name: '生成交换订单' })); await screen.findByRole('button', { name: '查看交换订单' });
+    expect(posts).toHaveLength(2); expect(posts[1].header?.Authorization).toBe('Bearer B');
+    expect(posts[1].header?.['Idempotency-Key']).not.toBe(posts[0].header?.['Idempotency-Key']);
+  });
+  it('converts a confirmed proposal explicitly and opens its order entry', async () => {
+    const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11), roles: ['CUSTOMER'] }), getProposal: vi.fn().mockResolvedValue(confirmed), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };
+    const orderApi = { convertProposal: vi.fn().mockResolvedValue({ order: orderFixture() }) };
+    render(<ProposalDetailPage api={api} orderApi={orderApi} proposalId={proposal.id} />);
+    fireEvent.click(await screen.findByRole('button', { name: '生成交换订单' }));
+    expect(await screen.findByRole('button', { name: '查看交换订单' })).toBeVisible();
+    expect(orderApi.convertProposal).toHaveBeenCalledWith(proposal.id, { expectedVersion: 3 });
+    expect(screen.queryByRole('button', { name: '取消提案' })).not.toBeInTheDocument();
+  });
+  it('does not attach a delayed conversion to a different proposal after navigation', async () => {
+    const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11), roles: ['CUSTOMER'] }), getProposal: vi.fn().mockResolvedValue(confirmed), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };
+    let resolve!: (value: { order: ReturnType<typeof orderFixture> }) => void;
+    const orderApi = { convertProposal: vi.fn().mockReturnValue(new Promise(r => { resolve = r; })) };
+    const page = render(<ProposalDetailPage api={api} orderApi={orderApi} proposalId={proposal.id} />);
+    fireEvent.click(await screen.findByRole('button', { name: '生成交换订单' }));
+    const second = { ...confirmed, id: id(9), versions: [{ ...confirmed.versions[0]!, number: 2 }], currentVersion: 2 };
+    api.getProposal.mockResolvedValue(second); page.rerender(<ProposalDetailPage api={api} orderApi={orderApi} proposalId={second.id} />);
+    await screen.findByText('方案历史 · 第 2 版');
+    await act(async () => { resolve({ order: orderFixture() }); });
+    expect(screen.queryByRole('button', { name: '查看交换订单' })).not.toBeInTheDocument();
+    expect(screen.getByText('方案历史 · 第 2 版')).toBeVisible();
+  });
+  it('shows converted status without proposal commands or obsolete no-order guidance', async () => {
+    const converted: ProposalView = { ...proposal, status: 'CONVERTED', orderId: id(20) };
+    const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11) }), getProposal: vi.fn().mockResolvedValue(converted), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };
+    render(<ProposalDetailPage api={api} proposalId={proposal.id} />);
+    expect(await screen.findByText('已转换为订单')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /接受方案|拒绝方案|取消提案|修改方案/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('接受后仅占用物品 72 小时，不产生订单或支付。')).not.toBeInTheDocument();
+  });
   it('shows who pays each courier estimate as visible text', () => {
     render(<ProposalForm items={[item]} targetItemId={id(2)} onSubmit={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '选择快递' }));

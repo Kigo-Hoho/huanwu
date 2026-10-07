@@ -2,6 +2,7 @@ import type { ProposalItemSnapshot, ProposalView } from '@barter/contracts';
 import type { Prisma, ProposalVersionItem } from '../generated/prisma/client.js';
 
 export const proposalInclude = {
+  order: { select: { id: true } },
   versions: { orderBy: { number: 'asc' }, include: { items: { orderBy: { sortOrder: 'asc' } } } },
 } satisfies Prisma.ProposalInclude;
 
@@ -17,6 +18,7 @@ export function mapProposal(proposal: Prisma.ProposalGetPayload<{ include: typeo
   return {
     id: proposal.id, initiatorId: proposal.initiatorId, recipientId: proposal.recipientId,
     responderId: proposal.responderId, status: proposal.status, version: proposal.version,
+    orderId: proposal.order?.id ?? null,
     currentVersion: proposal.currentVersion, expiresAt: proposal.expiresAt.toISOString(),
     confirmedAt: proposal.confirmedAt?.toISOString() ?? null,
     reservationExpiresAt: proposal.reservationExpiresAt?.toISOString() ?? null,

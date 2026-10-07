@@ -13,6 +13,8 @@ import { LoginPage } from '../features/auth/login-page';
 import { ItemReviewPage } from '../features/review/item-review-page';
 import { ReviewQueuePage } from '../features/review/review-queue-page';
 import { ProposalListPage, ProposalDetailPage } from '../features/proposals/proposal-pages';
+import { OrderListPage } from '../features/orders/order-list-page';
+import { OrderDetailPage } from '../features/orders/order-detail-page';
 import {
   ApiError,
   apiClient,
@@ -50,7 +52,7 @@ function OperatorLayout({
           </Button>
         </div>
       </Header>
-      <nav className="workspace-nav"><Link to="/reviews">物品审核</Link><Link to="/proposals">交换提案</Link></nav>
+      <nav className="workspace-nav"><Link to="/reviews">物品审核</Link><Link to="/proposals">交换提案</Link><Link to="/orders">订单查询</Link></nav>
       <div className="ant-layout-content">{children}</div>
     </Layout>
   );
@@ -158,6 +160,7 @@ function RouterContent() {
       />
       <Route path="*" element={<Navigate to={session ? '/reviews' : '/login'} replace />} />
       {['/proposals', '/proposals/:proposalId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); setSession(null); }}>{path === '/proposals' ? <ProposalListPage /> : <ProposalDetailPage />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
+      {['/orders', '/orders/:orderId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); setSession(null); }}>{path === '/orders' ? <OrderListPage /> : <OrderDetailPage />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
     </Routes>
   );
 }

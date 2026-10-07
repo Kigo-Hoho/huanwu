@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
 import { AuditModule } from './audit/audit.module.js';
@@ -9,9 +9,15 @@ import { HealthController } from './health/health.controller.js';
 import { ItemsModule } from './items/items.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { ProposalsModule } from './proposals/proposals.module.js';
+import { OrdersModule } from './orders/orders.module.js';
+import { IntegrationsModule } from './integrations/integrations.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
+import { TestingIntegrationsController } from './integrations/testing-integrations.controller.js';
+import { LogisticsModule } from './logistics/logistics.module.js';
+import { TestingLogisticsController } from './integrations/testing-logistics.controller.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule],
   controllers: [HealthController],
   providers: [
     {
@@ -20,4 +26,9 @@ import { ProposalsModule } from './proposals/proposals.module.js';
     },
   ],
 })
-export class AppModule {}
+export class AppModule {
+  static forEnvironment(): DynamicModule {
+    const testing = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
+    return { module: AppModule, controllers: [...(testing && process.env.PAYMENT_PROVIDER === 'simulated' ? [TestingIntegrationsController] : []), ...(testing && process.env.LOGISTICS_PROVIDER === 'simulated' ? [TestingLogisticsController] : [])] };
+  }
+}

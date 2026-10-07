@@ -2,10 +2,12 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ProposalViewSchema } from '@barter/contracts';
 
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { configureApp } from '../src/main.js';
+import { mapProposal, proposalInclude } from '../src/proposals/proposal.mapper.js';
 
 const prefix = 'task-2-public-items';
 const imageUrls = ['https://example.test/1.jpg', 'https://example.test/2.jpg', 'https://example.test/3.jpg'];
@@ -17,35 +19,12 @@ describe('public item discovery', () => {
   let hiddenId: string;
   let activeIds: string[];
 
-  async function cleanup() {
-    const users = await prisma.user.findMany({ where: { wechatOpenid: { startsWith: prefix } }, select: { id: true } });
-    const userIds = users.map(({ id }) => id);
-    if (!userIds.length) return;
-    const items = await prisma.item.findMany({ where: { ownerId: { in: userIds } }, select: { id: true } });
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" DISABLE TRIGGER "ProposalVersion_immutable"');
-      await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" DISABLE TRIGGER "ProposalVersionItem_immutable"');
-      try {
-        await tx.itemReservation.deleteMany({ where: { itemId: { in: items.map(({ id }) => id) } } });
-        await tx.proposalVersionItem.deleteMany({ where: { itemId: { in: items.map(({ id }) => id) } } });
-        await tx.proposalVersion.deleteMany({ where: { proposal: { initiatorId: { in: userIds } } } });
-        await tx.proposal.deleteMany({ where: { initiatorId: { in: userIds } } });
-        await tx.item.deleteMany({ where: { ownerId: { in: userIds } } });
-        await tx.user.deleteMany({ where: { id: { in: userIds } } });
-      } finally {
-        await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersionItem" ENABLE TRIGGER "ProposalVersionItem_immutable"');
-        await tx.$executeRawUnsafe('ALTER TABLE "ProposalVersion" ENABLE TRIGGER "ProposalVersion_immutable"');
-      }
-    });
-  }
-
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
-    await cleanup();
     const owner = await prisma.user.create({ data: { wechatOpenid: `${prefix}-owner`, roles: { create: { role: 'CUSTOMER' } } } });
     const recipient = await prisma.user.create({ data: { wechatOpenid: `${prefix}-recipient`, roles: { create: { role: 'CUSTOMER' } } } });
     ownerId = owner.id;
@@ -60,15 +39,38 @@ describe('public item discovery', () => {
     ]);
     activeIds = created.slice(0, 3).map(({ id }) => id);
     hiddenId = created[3]!.id;
-    const proposal = await prisma.proposal.create({ data: { initiatorId: owner.id, recipientId: recipient.id, responderId: recipient.id, expiresAt: new Date('2030-01-01T00:00:00Z') } });
-    const version = await prisma.proposalVersion.create({ data: { proposalId: proposal.id, authorId: owner.id, number: 1, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 } });
+    // Keep the recipient item newer than the discovery tests' cursor window.
+    const target = await createItem('对方目标物品', 'ACTIVE', new Date('2026-09-22T00:00:00Z'), recipient.id);
+    // Operator queries share this test database. A nested write ensures they
+    // never observe a committed version without its complete item snapshots.
+    const proposal = await prisma.proposal.create({ data: {
+      initiatorId: owner.id, recipientId: recipient.id, responderId: recipient.id, expiresAt: new Date('2030-01-01T00:00:00Z'),
+      versions: { create: {
+        authorId: owner.id, number: 1, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0,
+        items: { create: [...created.slice(0, 2), target].map((item, index) => ({
+          itemId: item.id, ownerId: item.ownerId, itemVersion: item.version,
+          side: index < 2 ? 'INITIATOR' : 'RECIPIENT', sortOrder: index < 2 ? index : 0,
+          title: item.title, description: item.description, referenceValueFen: item.referenceValueFen,
+          condition: item.condition, wantedText: item.wantedText, imageUrls,
+        })) },
+      } },
+    }, include: { versions: true } });
+    const version = proposal.versions[0]!;
     await prisma.itemReservation.createMany({ data: [
       { itemId: activeIds[0]!, proposalId: proposal.id, proposalVersionId: version.id, expiresAt: new Date('2030-01-01T00:00:00Z') },
       { itemId: activeIds[1]!, proposalId: proposal.id, proposalVersionId: version.id, expiresAt: new Date('2020-01-01T00:00:00Z') },
     ] });
   });
 
-  afterAll(async () => { if (prisma) await cleanup(); if (app) await app.close(); });
+  afterAll(async () => { if (app) await app.close(); });
+
+  it('commits a complete reservation proposal that operator reads can map', async () => {
+    const proposal = await prisma.proposal.findFirstOrThrow({ where: { initiatorId: ownerId }, include: proposalInclude });
+    const view = ProposalViewSchema.parse(mapProposal(proposal));
+    expect(view.versions[0]!.offeredItems.map(item => item.itemId)).toEqual(activeIds.slice(0, 2));
+    expect(view.versions[0]!.targetItem.ownerId).toBe(view.recipientId);
+    expect(view.versions[0]!.targetItem.imageUrls).toEqual(imageUrls);
+  });
 
   it('lists only active items with explicit safe fields and availability based on live reservations', async () => {
     // Browser runs leave newer reviewed items in the same dedicated test database.

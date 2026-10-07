@@ -13,10 +13,10 @@
     "predb:seed": "npm run db:generate",
     "db:seed": "prisma db seed",
     "dev": "tsx watch src/main.ts",
-    "lint": "eslint src test prisma prisma.config.ts vitest.config.ts",
+    "lint": "eslint src test prisma prisma.config.ts vitest.config.ts vitest.phase3.config.ts",
     "pretest": "npm run build --workspace @barter/contracts",
     "start": "node dist/src/main.js",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.phase3.config.ts",
     "pretypecheck": "npm run build --workspace @barter/contracts",
     "typecheck": "prisma generate && tsc --noEmit"
   },
@@ -29,6 +29,7 @@
     "@prisma/client": "^7.10.0",
     "argon2": "^0.45.1",
     "dotenv": "^17.2.2",
+    "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^4.1.12"
@@ -38,6 +39,7 @@
     "@nestjs/testing": "^12.0.4",
     "@types/express": "^5.0.3",
     "@types/node": "^24.5.2",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^6.0.3",
     "eslint": "^10.11.0",
     "prisma": "^7.10.0",

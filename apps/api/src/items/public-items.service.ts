@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { reservationIsAvailable } from '../reservations/reservation-policy.js';
+import { CLOCK, type Clock } from '../common/clock.js';
 
 const cursorSchema = z.strictObject({ createdAt: z.iso.datetime(), id: z.string().uuid() });
 type PublicItem = Prisma.ItemGetPayload<{ include: { images: true; reservation: true } }>;
@@ -26,14 +28,14 @@ function mapPublicItem(item: PublicItem, now: Date): PublicItemView {
     title: item.title, description: item.description, referenceValueFen: item.referenceValueFen,
     condition: item.condition, wantedText: item.wantedText,
     imageUrls: [...item.images].sort((a, b) => a.sortOrder - b.sortOrder).map(({ url }) => url),
-    availableForProposal: !item.reservation || item.reservation.expiresAt <= now,
+    availableForProposal: reservationIsAvailable(item.reservation, now),
     createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(),
   };
 }
 
 @Injectable()
 export class PublicItemsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(CLOCK) private readonly clock: Clock) {}
 
   async list(cursorValue?: string, limitValue?: string): Promise<PublicItemList> {
     const limit = limitValue === undefined ? 20 : Number(limitValue);
@@ -41,7 +43,7 @@ export class PublicItemsService {
       throw new BadRequestException({ code: 'VALIDATION_FAILED', message: 'Invalid page limit' });
     }
     const cursor = cursorValue === undefined ? undefined : decodeCursor(cursorValue);
-    const now = new Date();
+    const now = this.clock.now();
     const items = await this.prisma.item.findMany({
       where: {
         status: 'ACTIVE',
@@ -69,6 +71,6 @@ export class PublicItemsService {
       include: { images: true, reservation: true },
     });
     if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item was not found' });
-    return mapPublicItem(item, new Date());
+    return mapPublicItem(item, this.clock.now());
   }
 }

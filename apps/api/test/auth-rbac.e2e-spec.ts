@@ -75,8 +75,6 @@ describe('authentication and role authorization', () => {
     await app.init();
     prisma = app.get(PrismaService);
 
-    await prisma.user.deleteMany({ where: { wechatOpenid: customerOpenid } });
-
     const customerResponse = await request(app.getHttpServer())
       .post('/api/auth/wechat')
       .send({ code: 'valid-customer-code' })
@@ -97,22 +95,6 @@ describe('authentication and role authorization', () => {
   });
 
   afterAll(async () => {
-    if (prisma) {
-      await prisma.user.deleteMany({ where: { wechatOpenid: customerOpenid } });
-      if (reviewerId) {
-        await prisma.user.update({
-          where: { id: reviewerId },
-          data: { disabledAt: null, wechatOpenid: null },
-        });
-        await prisma.userRole.upsert({
-          where: {
-            userId_role: { userId: reviewerId, role: 'REVIEWER' },
-          },
-          update: {},
-          create: { userId: reviewerId, role: 'REVIEWER' },
-        });
-      }
-    }
     if (app) {
       await app.close();
     }

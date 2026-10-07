@@ -5,6 +5,9 @@ import { AuditService } from '../audit/audit.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { IdempotencyRecord, Prisma } from '../generated/prisma/client.js';
 import { mapProposal, proposalInclude } from './proposal.mapper.js';
+import { CLOCK, type Clock } from '../common/clock.js';
+import { reservationIsAvailable } from '../reservations/reservation-policy.js';
+import { ReservationsService } from '../reservations/reservations.service.js';
 
 const commandName = 'CREATE_PROPOSAL';
 const pendingLifetimeMs = 7 * 24 * 60 * 60 * 1000;
@@ -38,6 +41,8 @@ export class ProposalsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(ReservationsService) private readonly reservations: ReservationsService,
   ) {}
 
   async expire(id: string): Promise<boolean> {
@@ -46,9 +51,12 @@ export class ProposalsService {
       const proposal = await tx.proposal.findUnique({ where: { id }, include: proposalInclude });
       if (!proposal || !['PENDING', 'CONFIRMED'].includes(proposal.status)) return false;
       const deadline = proposal.status === 'CONFIRMED' ? proposal.reservationExpiresAt : proposal.expiresAt;
-      if (!deadline || deadline > new Date()) return false;
+      if (!deadline || deadline > this.clock.now()) return false;
+      const leases = await tx.itemReservation.findMany({ where: { proposalId: id, orderId: null }, select: { itemId: true } });
+      await this.reservations.lockItems(tx, leases.map(lease => lease.itemId));
+      if (deadline > this.clock.now()) return false;
       const before = mapProposal(proposal);
-      await tx.itemReservation.deleteMany({ where: { proposalId: id } });
+      await tx.itemReservation.deleteMany({ where: { proposalId: id, orderId: null } });
       const after = mapProposal(await tx.proposal.update({ where: { id }, data: { status: 'EXPIRED', version: { increment: 1 } }, include: proposalInclude }));
       await this.audit.record(tx, {
         actorId: null, action: 'PROPOSAL_EXPIRED', entityType: 'Proposal', entityId: id,
@@ -60,7 +68,7 @@ export class ProposalsService {
   }
 
   async expireDue(): Promise<void> {
-    const now = new Date();
+    const now = this.clock.now();
     const due = await this.prisma.proposal.findMany({ where: { OR: [
       { status: 'PENDING', expiresAt: { lte: now } },
       { status: 'CONFIRMED', reservationExpiresAt: { lte: now } },
@@ -81,10 +89,8 @@ export class ProposalsService {
 
         const itemIds = [...input.offeredItemIds, input.targetItemId];
         // Same deterministic lock order as reservation commands; reread after acquiring all locks.
-        for (const id of [...itemIds].sort()) {
-          await tx.$queryRaw`SELECT "id" FROM "Item" WHERE "id" = ${id}::uuid FOR UPDATE`;
-        }
-        const now = new Date();
+        await this.reservations.lockItems(tx, itemIds);
+        const now = this.clock.now();
         const items = await tx.item.findMany({
           where: { id: { in: itemIds } },
           include: { images: { orderBy: { sortOrder: 'asc' } }, reservation: true },
@@ -92,7 +98,7 @@ export class ProposalsService {
         const target = items.find(item => item.id === input.targetItemId);
         if (!target || target.ownerId === actorId || items.length !== itemIds.length) throw unavailable();
         for (const item of items) {
-          if (item.status !== 'ACTIVE' || (item.reservation && item.reservation.expiresAt > now) ||
+          if (item.status !== 'ACTIVE' || !reservationIsAvailable(item.reservation, now) ||
               (item.id !== target.id && item.ownerId !== actorId)) throw unavailable();
         }
         const snapshots = itemIds.map((id, index) => {
@@ -165,7 +171,7 @@ export class ProposalsService {
         if (previous) return replay(previous, requestHash);
         await tx.idempotencyRecord.create({ data: { ...identity, requestHash, response: {} } });
         if (proposal.status === 'EXPIRED') throw new ConflictException({ code: 'PROPOSAL_EXPIRED', message: 'Proposal has expired' });
-        const now = new Date();
+        const now = this.clock.now();
         const deadline = proposal.status === 'CONFIRMED' ? proposal.reservationExpiresAt : proposal.expiresAt;
         if (['PENDING', 'CONFIRMED'].includes(proposal.status) && deadline && deadline <= now) {
           throw new ConflictException({ code: 'PROPOSAL_EXPIRED', message: 'Proposal has expired' });
@@ -183,11 +189,9 @@ export class ProposalsService {
         if (action === 'accept') {
           const current = proposal.versions.find(version => version.number === proposal.currentVersion)!;
           const snapshots = [...current.items].sort((a, b) => a.itemId.localeCompare(b.itemId));
-          for (const snapshot of snapshots) {
-            await tx.$queryRaw`SELECT "id" FROM "Item" WHERE "id" = ${snapshot.itemId}::uuid FOR UPDATE`;
-          }
+          await this.reservations.lockItems(tx, snapshots.map(snapshot => snapshot.itemId));
           const items = await tx.item.findMany({ where: { id: { in: snapshots.map(item => item.itemId) } }, include: { reservation: true } });
-          const acceptedAt = new Date();
+          const acceptedAt = this.clock.now();
           if (proposal.expiresAt <= acceptedAt) throw new ConflictException({ code: 'PROPOSAL_EXPIRED', message: 'Proposal has expired' });
           if (items.length !== snapshots.length || snapshots.length < 2 || snapshots.length > 6) throw unavailable();
           for (const snapshot of snapshots) {
@@ -195,7 +199,7 @@ export class ProposalsService {
             const ownerId = snapshot.side === 'INITIATOR' ? proposal.initiatorId : proposal.recipientId;
             if (item.status !== 'ACTIVE' || item.ownerId !== ownerId || snapshot.ownerId !== ownerId) throw unavailable();
             if (item.reservation) {
-              if (item.reservation.expiresAt <= acceptedAt) throw new ExpiredLease(item.reservation.proposalId);
+              if (reservationIsAvailable(item.reservation, acceptedAt) && item.reservation.proposalId) throw new ExpiredLease(item.reservation.proposalId);
               throw unavailable();
             }
           }
@@ -211,18 +215,16 @@ export class ProposalsService {
             throw new ForbiddenException({ code: 'PROPOSAL_SIDE_FORBIDDEN', message: 'Only your own side items may change' });
           }
           const itemIds = [...offer.offeredItemIds, offer.targetItemId];
-          for (const itemId of [...itemIds].sort()) {
-            await tx.$queryRaw`SELECT "id" FROM "Item" WHERE "id" = ${itemId}::uuid FOR UPDATE`;
-          }
+          await this.reservations.lockItems(tx, itemIds);
           const items = await tx.item.findMany({ where: { id: { in: itemIds } }, include: { images: { orderBy: { sortOrder: 'asc' } }, reservation: true } });
           if (items.length !== itemIds.length) throw unavailable();
-          const snapshotTime = new Date();
+          const snapshotTime = this.clock.now();
           // Waiting for an item lock must not let a now-expired offer be renewed.
           if (proposal.expiresAt <= snapshotTime) throw new ConflictException({ code: 'PROPOSAL_EXPIRED', message: 'Proposal has expired' });
           const snapshots = itemIds.map((itemId, index) => {
             const item = items.find(candidate => candidate.id === itemId)!;
             const target = itemId === offer.targetItemId;
-            if (item.ownerId !== (target ? proposal.recipientId : proposal.initiatorId) || item.status !== 'ACTIVE' || (item.reservation && item.reservation.expiresAt > snapshotTime)) throw unavailable();
+            if (item.ownerId !== (target ? proposal.recipientId : proposal.initiatorId) || item.status !== 'ACTIVE' || !reservationIsAvailable(item.reservation, snapshotTime)) throw unavailable();
             return {
               itemId, ownerId: item.ownerId, itemVersion: item.version, side: target ? 'RECIPIENT' as const : 'INITIATOR' as const,
               sortOrder: target ? 0 : index, title: item.title, description: item.description, condition: item.condition,
@@ -241,8 +243,13 @@ export class ProposalsService {
             expiresAt: new Date(snapshotTime.getTime() + pendingLifetimeMs),
           } });
         } else {
+          if (action === 'cancel') {
+            const leases = await tx.itemReservation.findMany({ where: { proposalId: id, orderId: null }, select: { itemId: true } });
+            await this.reservations.lockItems(tx, leases.map(lease => lease.itemId));
+            if (deadline && deadline <= this.clock.now()) throw new ConflictException({ code: 'PROPOSAL_EXPIRED', message: 'Proposal has expired' });
+          }
           await tx.proposal.update({ where: { id }, data: { status: action === 'reject' ? 'REJECTED' : 'CANCELLED', version: { increment: 1 } } });
-          if (action === 'cancel') await tx.itemReservation.deleteMany({ where: { proposalId: id } });
+          if (action === 'cancel') await tx.itemReservation.deleteMany({ where: { proposalId: id, orderId: null } });
         }
         const response = mapProposal(await tx.proposal.findUniqueOrThrow({ where: { id }, include: proposalInclude }));
         await this.audit.record(tx, {
@@ -257,7 +264,7 @@ export class ProposalsService {
       if (error instanceof ExpiredLease) {
         // Release our proposal/item locks before acquiring another proposal lock.
         await this.expire(error.proposalId);
-        const stale = await this.prisma.itemReservation.count({ where: { proposalId: error.proposalId, expiresAt: { lte: new Date() } } });
+        const stale = await this.prisma.itemReservation.count({ where: { proposalId: error.proposalId, orderId: null, expiresAt: { lte: this.clock.now() } } });
         if (stale) throw unavailable();
         return this.command(actorId, id, action as 'accept', input, key, requestId);
       }

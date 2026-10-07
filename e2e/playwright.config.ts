@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const apiEnvironment = JSON.parse(process.env.BARTER_E2E_API_ENV ?? '{}') as Record<string, string>;
+if (!apiEnvironment.DATABASE_URL) throw new Error('Run acceptance through npm run e2e to allocate an isolated database.');
+const frontendEnvironment = { ...process.env, BARTER_E2E_API_ENV: '', E2E_REVIEWER_PASSWORD: '' };
+
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
@@ -17,17 +21,17 @@ export default defineConfig({
   webServer: [
     {
       cwd: '..',
-      command: 'npm run dev --workspace @barter/api',
+      command: 'node apps/api/dist/src/main.js',
       url: 'http://127.0.0.1:3000/api/health',
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
-        ...process.env,
+        ...apiEnvironment,
+        BARTER_E2E_API_ENV: '',
         NODE_ENV: 'test',
         PORT: '3000',
         WECHAT_IDENTITY_PROVIDER: 'acceptance',
         CORS_ORIGINS: 'http://127.0.0.1:10086,http://localhost:10086',
-        LOCAL_IMAGE_STORAGE_DIR: '.local/e2e-item-images',
         IMAGE_PUBLIC_BASE_URL:
           'http://127.0.0.1:3000/api/uploads/item-images/files',
       },
@@ -35,6 +39,7 @@ export default defineConfig({
     {
       cwd: '..',
       command: 'node scripts/serve-static.mjs apps/miniapp/dist 10086',
+      env: frontendEnvironment,
       url: 'http://127.0.0.1:10086/pages/items/create/index',
       reuseExistingServer: false,
       timeout: 30_000,
@@ -43,6 +48,7 @@ export default defineConfig({
       cwd: '..',
       command:
         'npm run dev --workspace @barter/admin -- --host 127.0.0.1 --strictPort',
+      env: frontendEnvironment,
       url: 'http://127.0.0.1:5173/login',
       reuseExistingServer: false,
       timeout: 60_000,

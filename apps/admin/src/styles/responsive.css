@@ -7,8 +7,55 @@
 
 .workspace-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 24px;
   padding: 14px 24px;
+}
+
+.order-page {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.order-page > .ant-card {
+  margin-block: 16px;
+}
+
+.order-page .ant-card-head-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.order-page .ant-table {
+  table-layout: fixed;
+}
+
+.order-page .ant-table table {
+  table-layout: fixed;
+}
+
+.order-sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+}
+
+.order-sides > * {
+  min-width: 0;
+}
+
+.order-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-block: 16px;
+}
+
+.order-filter select {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px;
 }
 
 .proposal-page {
