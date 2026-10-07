@@ -339,6 +339,8 @@ expect(screen.queryByRole('button', { name: '确认对方收货' })).not.toBeInT
 
 ## Task 12: 运营订单只读 API 和响应式页面
 
+任务12经控制器批准的有限文件补充：新增 `apps/api/src/orders/order-list-query.ts`，并修改 `orders.service.ts`／`orders.controller.ts` 复用现有纯分页逻辑，避免复制私有游标校验与编码；不改变客户权限、到期清理、稳定排序或 RepeatableRead 读取顺序。独立运营服务只读，异常通过 `status=ON_HOLD` 筛选。
+
 **Files:** Create `apps/api/src/orders/admin-orders.controller.ts`、`admin-orders.service.ts`、`test/phase3/admin-orders.e2e-spec.ts`；Modify OrdersModule；Create `apps/admin/src/features/orders/order-list-page.tsx`、`order-detail-page.tsx`、`orders.test.tsx`；Modify router、api-client、responsive.css。
 
 **Interfaces:** `AdminOrdersService.list({cursor?,status?,limit?}):Promise<OrderListView>`、`detail(id):Promise<OrderView>`；GET /api/admin/orders 与 /:id，Roles OPERATIONS／REVIEWER／SUPER_ADMIN；没有POST。前端 `listOrders(query)`、`getOrder(id)` 只GET。

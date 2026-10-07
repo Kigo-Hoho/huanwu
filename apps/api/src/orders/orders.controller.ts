@@ -1,4 +1,4 @@
-import { OrderAddressSchema, OrderCancellationSchema, OrderCancellationRespondSchema, OrderCancellationWithdrawSchema, OrderCommandSchema, OrderStatusSchema, ProposalIdempotencyKeySchema } from '@barter/contracts';
+import { OrderAddressSchema, OrderCancellationSchema, OrderCancellationRespondSchema, OrderCancellationWithdrawSchema, OrderCommandSchema, ProposalIdempotencyKeySchema } from '@barter/contracts';
 import { BadRequestException, Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
@@ -9,7 +9,7 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { OrdersService } from './orders.service.js';
 import { OrderAddressService } from './order-address.service.js';
 import { OrderCancellationService } from './order-cancellation.service.js';
-const listSchema = z.strictObject({ cursor: z.string().optional(), status: OrderStatusSchema.optional(), limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional() });
+import { orderListQuerySchema } from './order-list-query.js';
 const addressQuerySchema = z.strictObject({ side: z.enum(['self', 'outgoing']) });
 @Controller()
 @UseGuards(JwtAuthGuard, CustomerOnlyGuard)
@@ -24,7 +24,7 @@ export class OrdersController {
   @Get('orders/:id')
   detail(@CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) { return this.orders.detail(actor, id.toLowerCase()); }
   @Get('me/orders')
-  list(@CurrentUser() actor: AuthenticatedUser, @Query(new ZodValidationPipe(listSchema)) query: z.output<typeof listSchema>) { return this.orders.list(actor, query); }
+  list(@CurrentUser() actor: AuthenticatedUser, @Query(new ZodValidationPipe(orderListQuerySchema)) query: z.output<typeof orderListQuerySchema>) { return this.orders.list(actor, query); }
   @Post('orders/:id/address')
   @HttpCode(200)
   address(@CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string, @Body(new ZodValidationPipe(OrderAddressSchema)) input: unknown, @Headers('idempotency-key') key: string | undefined, @Headers('x-request-id') requestId: string | undefined) {

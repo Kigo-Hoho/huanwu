@@ -1,6 +1,5 @@
-import { OrderCommandResultSchema, OrderStatusSchema, type OrderCommandInput, type OrderCommandResult, type OrderListView, type OrderStatus, type OrderView } from '@barter/contracts';
-import { BadRequestException, ConflictException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { z } from 'zod';
+import { OrderCommandResultSchema, type OrderCommandInput, type OrderCommandResult, type OrderListView, type OrderView } from '@barter/contracts';
+import { ConflictException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { assertPureCustomer } from '../auth/customer-only.guard.js';
@@ -16,17 +15,7 @@ import { mapOrder } from './order.mapper.js';
 import { readOrder, readOrderRelations } from './order-reader.js';
 import { testOrderRules } from './order-rules.js';
 import { OrderExpiryService } from './order-expiry.service.js';
-
-const cursorSchema = z.strictObject({ createdAt: z.iso.datetime(), id: z.string().uuid().toLowerCase() });
-const invalidQuery = () => new BadRequestException({ code: 'VALIDATION_FAILED', message: 'Invalid order query' });
-function decodeCursor(value: string) {
-  try {
-    const decoded = Buffer.from(value, 'base64url').toString('utf8');
-    if (Buffer.from(decoded).toString('base64url') !== value) throw invalidQuery();
-    return cursorSchema.parse(JSON.parse(decoded));
-  } catch { throw invalidQuery(); }
-}
-export interface OrderListQuery { cursor?: string; status?: OrderStatus; limit?: number }
+import { orderListQuery, orderNextCursor, type OrderListQuery } from './order-list-query.js';
 
 @Injectable()
 export class OrdersService {
@@ -109,9 +98,7 @@ export class OrdersService {
   }
   async list(actor: AuthenticatedUser, query: OrderListQuery): Promise<OrderListView> {
     assertPureCustomer(actor);
-    const limit = query.limit ?? 20;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || (query.status !== undefined && !OrderStatusSchema.safeParse(query.status).success)) throw invalidQuery();
-    const cursor = query.cursor === undefined ? undefined : decodeCursor(query.cursor);
+    const { limit, after } = orderListQuery(query);
     // Reconcile only this participant's orders before applying status filters:
     // an expired AWAITING_DETAILS order now belongs in the CANCELLED filter.
     const candidates = await this.prisma.order.findMany({ where: { OR: [{ initiatorId: actor.id }, { recipientId: actor.id }], status: { in: ['AWAITING_DETAILS', 'AWAITING_PAYMENT', 'AWAITING_FULFILLMENT', 'IN_TRANSIT', 'AWAITING_ACCEPTANCE'] } }, select: { id: true } });
@@ -120,11 +107,11 @@ export class OrdersService {
       const orders = await tx.order.findMany({ where: {
         AND: [
           { OR: [{ initiatorId: actor.id }, { recipientId: actor.id }] },
-          ...(cursor ? [{ OR: [{ createdAt: { lt: new Date(cursor.createdAt) } }, { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } }] }] : []),
+          ...(after ? [after] : []),
         ], ...(query.status ? { status: query.status } : {}),
       }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1 });
       const page = orders.slice(0, limit); const last = page.at(-1);
-      return { items: (await readOrderRelations(tx, page)).map(mapOrder), nextCursor: orders.length > limit && last ? Buffer.from(JSON.stringify({ createdAt: last.createdAt.toISOString(), id: last.id })).toString('base64url') : null };
+      return { items: (await readOrderRelations(tx, page)).map(mapOrder), nextCursor: orderNextCursor(orders.length > limit, last) };
     }, { isolationLevel: 'RepeatableRead' });
   }
 }
