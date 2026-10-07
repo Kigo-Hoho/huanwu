@@ -28,7 +28,37 @@ test('acceptance refuses a source or non-owned target before constructing API cr
 test('owned lifecycle awaits cleanup and proof after browser failure and exposes cleanup failure', async () => {
   const { withOwnedDatabase } = await import('./prepare-e2e.mjs');
   const events = [];
-  await assert.rejects(withOwnedDatabase({ close: async () => { await Promise.resolve(); events.push('drop'); } }, async () => { events.push('browser'); throw Error('browser failed'); }, async () => { events.push('proof'); }), /browser failed/);
+  await assert.rejects(withOwnedDatabase({ close: async () => { await Promise.resolve(); events.push('drop'); } }, async () => { events.push('browser'); throw Error('browser failed'); }, async () => { events.push('proof'); }), /setup/);
   assert.deepEqual(events, ['browser', 'drop', 'proof']);
-  await assert.rejects(withOwnedDatabase({ close: async () => { throw Error('drop failed'); } }, async () => {}, async () => {}), /drop failed/);
+  await assert.rejects(withOwnedDatabase({ close: async () => { throw Error('drop failed'); } }, async () => {}, async () => {}), /cleanup/);
+});
+
+for (const failing of ['setup', 'cleanup', 'proof']) {
+  test(`owned acceptance labels ${failing} safely and still attempts cleanup and proof`, async () => {
+    const { withOwnedDatabase } = await import('./prepare-e2e.mjs');
+    const events = [];
+    const step = name => async () => { await Promise.resolve(); events.push(name); if (name === failing) throw Error('postgresql://private:password@host/database private-address'); };
+    await assert.rejects(withOwnedDatabase({ close: step('cleanup') }, step('setup'), step('proof')), error => {
+      assert.match(error.message, new RegExp(`E2E failed stages: ${failing}`));
+      assert.doesNotMatch(error.message, /password|private|postgresql/); return true;
+    });
+    assert.deepEqual(events, ['setup', 'cleanup', 'proof']);
+  });
+}
+test('owned acceptance preserves simultaneous failure categories without raw driver text', async () => {
+  const { withOwnedDatabase } = await import('./prepare-e2e.mjs');
+  const fail = async () => { throw Error('secret-driver-detail'); };
+  await assert.rejects(withOwnedDatabase({ close: fail }, fail, fail), error => {
+    assert.equal(error.message, 'E2E failed stages: setup, cleanup, proof'); assert.equal(error.errors.length, 3); return true;
+  });
+});
+test('real failed child is categorized and owned cleanup and proof are awaited', async () => {
+  const { command, withOwnedDatabase, safeAcceptanceFailure } = await import('./prepare-e2e.mjs');
+  const events = [];
+  await assert.rejects(withOwnedDatabase({ close: async () => { events.push('cleanup'); } },
+    () => command(['-e', 'process.exitCode = 7'], process.env), async () => { events.push('proof'); }), error => {
+    assert.equal(safeAcceptanceFailure(error), 'E2E failed stages: child'); return true;
+  });
+  assert.deepEqual(events, ['cleanup', 'proof']);
+  assert.equal(safeAcceptanceFailure(Error('postgresql://secret')), 'E2E failed stages: setup');
 });

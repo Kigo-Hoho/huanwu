@@ -18,15 +18,16 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
   const [address, setAddress] = useState<OrderAddressView | null>(null); const [privateBusy, setPrivateBusy] = useState(false);
   const [unknown, setUnknown] = useState(false); const pending = useRef<PendingOrderCommand | null>(null);
   const generation = useRef(0); const lifecycle = useRef(0); const locked = useRef(false); const alive = useRef(false);
+  const refreshRead = useRef(0);
   const apply = (incoming: OrderView) => {
     if (!alive.current || incoming.id !== orderId || (current.current && incoming.version < current.current.version)) return;
     current.current = incoming; setOrder(incoming);
   };
   const refresh = async () => {
-    const read = ++generation.current; const life = lifecycle.current; setAddress(null); setPrivateBusy(false);
+    const read = ++refreshRead.current; ++generation.current; const life = lifecycle.current; setAddress(null); setPrivateBusy(false);
     try {
-      const [detail, actor] = await Promise.all([api.getOrder(orderId), api.getMe()]);
-      if (alive.current && life === lifecycle.current && read === generation.current) {
+      const actor = await api.getMe(); const detail = await api.getOrder(orderId);
+      if (alive.current && life === lifecycle.current && read === refreshRead.current) {
         if (identity.current !== null && identity.current !== actor.id) {
           generation.current += 1; pending.current = null; setUnknown(false); setReason(''); setError(''); setAddress(null); setPrivateBusy(false);
         }
@@ -34,13 +35,18 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
         pending.current = api.getPendingCommand(orderId, actor.id); setUnknown(!!pending.current);
       }
     } catch {
-      if (alive.current && life === lifecycle.current && read === generation.current) { setMe(null); setError('订单刷新失败，请核对登录身份后重试。'); }
+      if (alive.current && life === lifecycle.current && read === refreshRead.current) { setMe(null); setError('订单刷新失败，请核对登录身份后重试。'); }
     }
   };
   useEffect(() => {
+    const unsubscribe = api.onIdentityInvalidated(() => {
+      generation.current += 1; identity.current = null; pending.current = null;
+      setMe(null); setAddress(null); setReason(''); setUnknown(false); setPrivateBusy(false);
+      setError('登录身份已变化或无法核实，请刷新订单并重新确认操作。');
+    });
     alive.current = true; const life = ++lifecycle.current; locked.current = false; setBusy(false); current.current = null; setOrder(null); setMe(null); setReason(''); setAddress(null); pending.current = null; setUnknown(false);
     void api.authenticate(defaultIdentityProvider).then(() => { if (alive.current && life === lifecycle.current) return refresh(); }).catch(() => { if (alive.current && life === lifecycle.current) setError('登录失败，请重新进入订单。'); });
-    return () => { alive.current = false; generation.current += 1; lifecycle.current += 1; };
+    return () => { unsubscribe(); alive.current = false; generation.current += 1; lifecycle.current += 1; };
   }, [api, orderId]);
   const run = async (action: OrderAction, input: unknown, resourceId = orderId, retry = false) => {
     if (locked.current || !current.current || !pureCustomer(me) || !current.current.parties.some(p => p.userId === me?.id)) return;

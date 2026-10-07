@@ -7,16 +7,22 @@ import { defaultIdentityProvider, defaultOrderApi } from '../../../lib/default-s
 import { alertRole, buttonRole, orderStatusLabels, pureCustomer } from '../shared';
 
 export function OrderListPage({ api = defaultOrderApi, navigate = (url: string) => { void Taro.navigateTo({ url }); } }: {
-  api?: Pick<OrderApi, 'authenticate' | 'getMe' | 'listMyOrders'>; navigate?: (url: string) => void;
+  api?: Pick<OrderApi, 'authenticate' | 'getMe' | 'listMyOrders'> & Partial<Pick<OrderApi, 'onIdentityInvalidated'>>; navigate?: (url: string) => void;
 }) {
   const [orders, setOrders] = useState<OrderView[]>([]); const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [refresh, setRefresh] = useState(0);
   const generation = useRef(0); const locked = useRef(false);
+  useEffect(() => api.onIdentityInvalidated?.(() => {
+    generation.current += 1; locked.current = false; setBusy(false); setOrders([]); setCursor(null);
+    setError('登录身份已变化或无法核实，请刷新订单列表。');
+  }), [api]);
   useEffect(() => {
-    let active = true; const current = ++generation.current; locked.current = true; setBusy(true);
+    let active = true; let current = ++generation.current; locked.current = true; setBusy(true);
     void (async () => {
       await api.authenticate(defaultIdentityProvider); const me = await api.getMe();
       if (!pureCustomer(me)) throw new Error('请使用普通用户身份查看我的订单。');
+      if (!active) return;
+      current = generation.current; locked.current = true; setBusy(true);
       const result = await api.listMyOrders();
       if (active && current === generation.current) { setOrders(result.items); setCursor(result.nextCursor); setError(''); }
     })().catch(() => { if (active && current === generation.current) { setOrders([]); setCursor(null); setError('订单加载失败，请核对登录身份后刷新。'); } }).finally(() => { if (active && current === generation.current) { locked.current = false; setBusy(false); } });
@@ -28,8 +34,8 @@ export function OrderListPage({ api = defaultOrderApi, navigate = (url: string) 
     try {
       const result = await api.listMyOrders({ cursor });
       if (current === generation.current) { setOrders(old => [...old, ...result.items.filter(item => !old.some(o => o.id === item.id))]); setCursor(result.nextCursor); }
-    } catch { setError('更多订单加载失败，请重试。'); }
-    finally { locked.current = false; setBusy(false); }
+    } catch { if (current === generation.current) setError('更多订单加载失败，请重试。'); }
+    finally { if (current === generation.current) { locked.current = false; setBusy(false); } }
   };
   return <View style={{ overflowWrap: 'anywhere', padding: '16px' }}>
     <Text>我的订单</Text><Button {...buttonRole} disabled={busy} onClick={() => { if (!locked.current) setRefresh(value => value + 1); }}>刷新订单列表</Button>

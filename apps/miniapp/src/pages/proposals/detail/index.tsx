@@ -16,7 +16,7 @@ interface ProposalApi {
   listMyItems(): Promise<ItemView[]>;
   commandProposal(id: string, action: 'counter' | 'accept' | 'reject' | 'cancel', input: CounterProposalInput | ProposalCommandInput, key: string): Promise<ProposalView>;
 }
-export function ProposalDetailPage({ api = defaultApiClient, orderApi = defaultOrderApi, proposalId = Taro.getCurrentInstance().router?.params.id ?? '' }: { api?: ProposalApi; orderApi?: Pick<OrderApi, 'convertProposal'>; proposalId?: string }) {
+export function ProposalDetailPage({ api = defaultApiClient, orderApi = defaultOrderApi, proposalId = Taro.getCurrentInstance().router?.params.id ?? '' }: { api?: ProposalApi; orderApi?: Pick<OrderApi, 'convertProposal'> & Partial<Pick<OrderApi, 'onIdentityInvalidated'>>; proposalId?: string }) {
   const [proposal, setProposal] = useState<ProposalView | null>(null);
   const [actor, setActor] = useState('');
   const [customer, setCustomer] = useState(false);
@@ -32,6 +32,11 @@ export function ProposalDetailPage({ api = defaultApiClient, orderApi = defaultO
   const lifecycle = useRef(0);
   const resource = useRef(proposalId);
   const attempt = useRef<{ body: string; key: string } | null>(null);
+  useEffect(() => orderApi.onIdentityInvalidated?.(() => {
+    lifecycle.current += 1; readGeneration.current += 1; conversion.current = null; attempt.current = null;
+    locked.current = false; setBusy(false); setConversionUnknown(false); setCustomer(false); setActor('');
+    setProposal(null); setItems([]); setEditing(false); setError('登录身份已变化或无法核实，请刷新方案并重新确认建单。');
+  }), [orderApi]);
   useEffect(() => {
     if (resource.current !== proposalId) {
       resource.current = proposalId; conversion.current = null; setConversionUnknown(false); locked.current = false; setBusy(false); setProposal(null);

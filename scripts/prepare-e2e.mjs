@@ -10,6 +10,19 @@ import { applyMigrations, createOwnedDatabase, newNamespace, phase3DatabaseName,
 
 const root = resolve(import.meta.dirname, '..');
 const privateNames = ['DATABASE_URL', 'JWT_SECRET', 'ADMIN_SEED_PASSWORD', 'E2E_REVIEWER_PASSWORD', 'ADDRESS_ENCRYPTION_KEY_BASE64', 'ADDRESS_ENCRYPTION_KEY_VERSION', 'SIMULATED_INTEGRATION_SIGNING_KEY_BASE64', 'PAYMENT_PROVIDER', 'LOGISTICS_PROVIDER', 'BARTER_E2E_API_ENV'];
+class AcceptanceStageError extends Error {
+  constructor(stage, cause) { super(`E2E failed stages: ${stage}`, { cause }); this.stage = stage; }
+}
+function stages(error) {
+  if (error instanceof AcceptanceStageError) return [error.stage];
+  if (error instanceof AggregateError) return error.errors.flatMap(stages);
+  return ['setup'];
+}
+export function safeAcceptanceFailure(error) { return `E2E failed stages: ${[...new Set(stages(error))].join(', ')}`; }
+async function atStage(stage, run) {
+  try { return await run(); }
+  catch (error) { if (error instanceof AcceptanceStageError) throw error; throw new AcceptanceStageError(stage, error); }
+}
 
 export function acceptanceEnvironment(source, databaseUrl, storageDirectory) {
   try {
@@ -33,11 +46,14 @@ export function acceptanceEnvironment(source, databaseUrl, storageDirectory) {
 
 export async function withOwnedDatabase(database, run, proof) {
   let failure;
-  try { await run(); } catch (error) { failure = error; }
+  try { await atStage('setup', run); } catch (error) { failure = error; }
   const cleanupErrors = [];
-  try { await database.close(); } catch (error) { cleanupErrors.push(error); }
-  try { await proof(); } catch (error) { cleanupErrors.push(error); }
-  if (cleanupErrors.length) throw new AggregateError([...(failure ? [failure] : []), ...cleanupErrors], cleanupErrors.map(error => error.message).join('; '));
+  try { await atStage('cleanup', () => database.close()); } catch (error) { cleanupErrors.push(error); }
+  try { await atStage('proof', proof); } catch (error) { cleanupErrors.push(error); }
+  if (cleanupErrors.length) {
+    const failures = new AggregateError([...(failure ? [failure] : []), ...cleanupErrors]);
+    failures.message = safeAcceptanceFailure(failures); throw failures;
+  }
   if (failure) throw failure;
 }
 
@@ -63,12 +79,12 @@ async function catalogProof(source, namespace) {
   finally { await client.end(); }
 }
 
-function command(args, environment) {
-  return new Promise((done, reject) => {
+export function command(args, environment) {
+  return atStage('child', () => new Promise((done, reject) => {
     const child = spawn(process.execPath, args, { cwd: root, env: environment, windowsHide: true, stdio: 'inherit' });
     child.once('error', () => reject(new Error('Acceptance subprocess could not start')));
     child.once('close', code => code === 0 ? done() : reject(new Error(`Acceptance subprocess exited ${code}`)));
-  });
+  }));
 }
 
 async function main(args) {
@@ -95,7 +111,7 @@ async function main(args) {
         TARO_APP_INTEGRATION_MODE: 'simulated',
       });
       await command([resolve(root, 'node_modules/@playwright/test/cli.js'), 'test', '--config', 'e2e/playwright.config.ts', ...args], env.browser);
-    } finally { await rm(images, { recursive: true }); }
+    } finally { await atStage('cleanup', () => rm(images, { recursive: true })); }
   }, async () => {
     await catalogProof(source, namespace);
     assert.deepEqual(await sourceSnapshot(source), before, 'Source public table counts and migrations must remain unchanged');
@@ -105,5 +121,5 @@ async function main(args) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   // Driver errors may include credentials or invalid URL input; never print them.
-  await main(process.argv.slice(2)).catch(() => { console.error('E2E failed; inspect preceding checks. Cleanup failures remain fatal; no database is forcibly dropped.'); process.exitCode = 1; });
+  await main(process.argv.slice(2)).catch(error => { console.error(`${safeAcceptanceFailure(error)}. Cleanup failures remain fatal; no database is forcibly dropped.`); process.exitCode = 1; });
 }

@@ -9,7 +9,7 @@ import {
 } from '@barter/contracts';
 import { z } from 'zod';
 import type { IdentityCodeProvider } from '../auth/identity-code.provider';
-import { ApiClientError, type AuthenticatedApiClient, type OrderRequestPath } from '../../lib/api-client';
+import { ApiClientError, OrderIdentityChangedError, type AuthenticatedApiClient, type OrderRequestPath } from '../../lib/api-client';
 
 const uuid = z.string().uuid().toLowerCase();
 const schemas = {
@@ -38,7 +38,14 @@ export class OrderApi {
   private readonly attempts = new Map<string, Attempt>();
   private actorId: string | null = null;
   private identityRead = 0;
-  constructor(private readonly client: Pick<AuthenticatedApiClient, 'orderRequest' | 'authenticate' | 'getMe'>) {}
+  private readonly identityListeners = new Set<() => void>();
+  constructor(private readonly client: Pick<AuthenticatedApiClient, 'orderRequest' | 'authenticate' | 'getMe'> & Partial<Pick<AuthenticatedApiClient, 'onOrderIdentityInvalidated'>>) {
+    client.onOrderIdentityInvalidated?.(() => {
+      this.actorId = null; this.attempts.clear();
+      for (const listener of this.identityListeners) listener();
+    });
+  }
+  onIdentityInvalidated(listener: () => void) { this.identityListeners.add(listener); return () => { this.identityListeners.delete(listener); }; }
   authenticate(provider: IdentityCodeProvider) { return this.client.authenticate(provider); }
   async getMe() {
     const read = ++this.identityRead;
@@ -111,7 +118,7 @@ export class OrderApi {
         if (this.attempts.get(slot) === current) this.attempts.delete(slot); // Release successful address plaintext immediately.
         return result;
       }).catch(cause => {
-        if (cause instanceof ApiClientError && cause.statusCode < 500 && this.attempts.get(slot) === current) this.attempts.delete(slot);
+        if ((cause instanceof OrderIdentityChangedError || cause instanceof ApiClientError && cause.statusCode < 500) && this.attempts.get(slot) === current) this.attempts.delete(slot);
         throw cause;
       }).finally(() => { current.inFlight = undefined; });
       return current.inFlight;

@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { ProposalViewSchema, type OrderCommandInput, type ProposalPayer, type DeliveryMode } from '@barter/contracts';
-import { Test } from '@nestjs/testing';
+import { Test, type TestingModule } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { vi } from 'vitest';
 import { AppModule } from '../../../src/app.module.js';
@@ -21,17 +22,34 @@ export class MutableClock implements Clock {
   advance(ms: number): void { this.value = new Date(this.value.getTime() + ms); }
 }
 export async function createOrderHarness() {
+  const previousUrl = process.env.DATABASE_URL;
   const database = await createPhase3Database();
   const clock = new MutableClock();
-  const module = await Test.createTestingModule({ imports: [AppModule.forEnvironment()] })
+  let module: TestingModule | undefined;
+  let app!: INestApplication;
+  let prisma!: PrismaService;
+  const actors = {} as Record<'initiator' | 'recipient' | 'outsider' | 'operator' | 'mixed', AuthenticatedUser>;
+  async function close(original?: unknown) {
+    const failures: unknown[] = original === undefined ? [] : [original];
+    vi.restoreAllMocks();
+    try { if (app) await app.close(); else if (module) await module.close(); } catch (error) { failures.push(error); }
+    try { if (prisma) await prisma.$disconnect(); } catch (error) { failures.push(error); }
+    try { await database.close(); } catch (error) { failures.push(error); }
+    finally { if (previousUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previousUrl; }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length) throw new AggregateError(failures, 'Order harness initialization or cleanup failed');
+  }
+  try {
+    // Retain the client even if Nest compilation fails before returning a module.
+    prisma = new PrismaService();
+    module = await Test.createTestingModule({ imports: [AppModule.forEnvironment()] })
+    .overrideProvider(PrismaService).useValue(prisma)
     .overrideProvider(CLOCK).useValue(clock)
     .overrideProvider(OutboxWorker).useValue({})
     .overrideProvider(OrderExpiryScheduler).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
-  const app = module.createNestApplication();
+  app = module.createNestApplication();
   configureApp(app); await app.init();
-  const prisma = app.get(PrismaService);
-  const actors = {} as Record<'initiator' | 'recipient' | 'outsider' | 'operator' | 'mixed', AuthenticatedUser>;
   for (const name of ['initiator', 'recipient', 'outsider', 'operator', 'mixed'] as const) {
     const roles: AuthenticatedUser['roles'] = name === 'operator' ? ['REVIEWER'] : name === 'mixed' ? ['CUSTOMER', 'OPERATIONS'] : ['CUSTOMER'];
     const user = await prisma.user.create({ data: {
@@ -40,6 +58,7 @@ export async function createOrderHarness() {
     } });
     actors[name] = { id: user.id, roles };
   }
+  } catch (error) { await close(error); throw error; }
   function token(actor: AuthenticatedUser) {
     const now = Math.floor(Date.now() / 1000);
     const unsigned = [{ alg: 'HS256', typ: 'JWT' }, { sub: actor.id, roles: actor.roles.includes('CUSTOMER') ? ['CUSTOMER'] : actor.roles, type: actor.roles.includes('CUSTOMER') ? 'CUSTOMER' : 'OPERATOR', iat: now, exp: now + 900 }].map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
@@ -70,7 +89,7 @@ export async function createOrderHarness() {
         throw new Error('Injected audit failure');
       });
     },
-    async close() { vi.restoreAllMocks(); await app.close(); await prisma.$disconnect(); await database.close(); },
+    close: () => close(),
   };
 }
 export type OrderHarness = Awaited<ReturnType<typeof createOrderHarness>>;

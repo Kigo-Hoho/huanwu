@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ItemView, ProposalView } from '@barter/contracts';
 import { ProposalForm } from './proposal-form';
 import { ProposalDetailPage } from './detail/index';
-import { ApiClientError } from '../../lib/api-client';
+import { ApiClientError, AuthenticatedApiClient, type RequestPort } from '../../lib/api-client';
+import { Session } from '../../features/auth/session';
+import { OrderApi } from '../../features/orders/order-api';
 import { orderFixture } from '../../test/order-fixtures';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -12,6 +14,38 @@ const snapshot = { ...item, itemId: item.id, itemVersion: 1 };
 const proposal: ProposalView = { id: id(5), initiatorId: id(10), recipientId: id(11), responderId: id(11), status: 'PENDING', version: 3, currentVersion: 1, expiresAt: '2026-10-06T00:00:00.000Z', confirmedAt: null, reservationExpiresAt: null, createdAt: item.createdAt, updatedAt: item.updatedAt, versions: [{ id: id(6), number: 1, authorId: id(10), createdAt: item.createdAt, offeredItems: [snapshot], targetItem: { ...snapshot, itemId: id(2), ownerId: id(11), title: '对方背包' }, differenceFen: 0, payer: 'NONE', deliveryMode: 'IN_PERSON', initiatorShippingFen: 0, recipientShippingFen: 0 }] };
 
 describe('proposal workbench', () => {
+  it.each(['automatic-401', 'unknown-then-session-change'] as const)('clears the old conversion intent on %s and requires refreshed new-actor confirmation', async failure => {
+    const stored = new Map<string, unknown>(); let actorId = id(10); let first = true;
+    const session = new Session({ getStorageSync: k => stored.get(k), setStorageSync: (k, v) => { stored.set(k, v); }, removeStorageSync: k => { stored.delete(k); } });
+    session.setAccessToken('A', 900, id(10)); const posts: Parameters<RequestPort>[0][] = [];
+    const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
+    const request: RequestPort = async options => {
+      if (options.url.endsWith('/auth/wechat')) { actorId = id(11); return { statusCode: 201, data: { accessToken: 'B', expiresIn: 900, user: { id: actorId, roles: ['CUSTOMER'] } } }; }
+      if (options.url.endsWith('/api/me')) return { statusCode: 200, data: { id: actorId, roles: ['CUSTOMER'] } };
+      if (options.url.endsWith('/api/me/items')) return { statusCode: 200, data: [] };
+      if (options.url.endsWith('/order')) {
+        posts.push(options);
+        if (first) { first = false; if (failure === 'automatic-401') return { statusCode: 401, data: {} }; throw Error('unknown conversion'); }
+        return { statusCode: 201, data: { order: orderFixture() } };
+      }
+      return { statusCode: 200, data: confirmed };
+    };
+    const client = new AuthenticatedApiClient('http://localhost', session, request); const orderApi = new OrderApi(client);
+    render(<ProposalDetailPage api={client} orderApi={orderApi} proposalId={proposal.id} />);
+    await screen.findByRole('button', { name: '生成交换订单' }); await client.authenticate({ getCode: async () => 'B' });
+    fireEvent.click(screen.getByRole('button', { name: '生成交换订单' }));
+    if (failure === 'unknown-then-session-change') {
+      await screen.findByRole('button', { name: '重试原建单操作' });
+      act(() => { actorId = id(11); session.setAccessToken('B', 900, actorId); });
+    } else await waitFor(() => expect(session.getAccessToken()).toBe('B'));
+    expect(screen.queryByRole('button', { name: '重试原建单操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '生成交换订单' })).not.toBeInTheDocument();
+    expect(screen.queryByText('方案历史 · 第 1 版')).not.toBeInTheDocument(); expect(posts).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '刷新方案' })); await screen.findByRole('button', { name: '生成交换订单' });
+    expect(posts).toHaveLength(1); fireEvent.click(screen.getByRole('button', { name: '生成交换订单' })); await screen.findByRole('button', { name: '查看交换订单' });
+    expect(posts).toHaveLength(2); expect(posts[1].header?.Authorization).toBe('Bearer B');
+    expect(posts[1].header?.['Idempotency-Key']).not.toBe(posts[0].header?.['Idempotency-Key']);
+  });
   it('converts a confirmed proposal explicitly and opens its order entry', async () => {
     const confirmed: ProposalView = { ...proposal, status: 'CONFIRMED' };
     const api = { authenticate: vi.fn(), getMe: vi.fn().mockResolvedValue({ id: id(11), roles: ['CUSTOMER'] }), getProposal: vi.fn().mockResolvedValue(confirmed), listMyItems: vi.fn().mockResolvedValue([]), commandProposal: vi.fn() };

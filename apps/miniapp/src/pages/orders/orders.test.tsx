@@ -22,7 +22,7 @@ function harness(initial = orderFixture(), roles: Role[] = ['CUSTOMER'], actor =
     if (options.url.endsWith('/api/me/orders')) return { statusCode: 200, data: { items: [order], nextCursor: null } };
     return { statusCode: 200, data: options.method === 'POST' ? { order } : order };
   });
-  return { api: new OrderApi(new AuthenticatedApiClient('http://localhost:3000', session, request)), request, calls, stored, setOrder: (value: OrderView) => { order = value; }, setActor: (value: string) => { currentActor = value; } };
+  return { api: new OrderApi(new AuthenticatedApiClient('http://localhost:3000', session, request)), request, calls, stored, session, setOrder: (value: OrderView) => { order = value; }, setActor: (value: string) => { currentActor = value; } };
 }
 function simulationBuild() {
   vi.stubGlobal('__INTEGRATION_MODE__', 'simulated'); vi.stubGlobal('__BUILD_ENVIRONMENT__', 'acceptance');
@@ -30,6 +30,44 @@ function simulationBuild() {
 }
 
 describe('customer order entry', () => {
+  it('clears the previous actor order list immediately and waits for explicit refreshed identity', async () => {
+    const h = harness(); render(<OrderListPage api={h.api} />);
+    await screen.findByRole('button', { name: '查看订单 ' + id(20) });
+    act(() => { h.setActor(id(11)); h.session.setAccessToken('B', 900, id(11)); });
+    expect(screen.queryByRole('button', { name: '查看订单 ' + id(20) })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '刷新订单列表' }));
+    expect(await screen.findByRole('button', { name: '查看订单 ' + id(20) })).toBeVisible();
+  });
+  it('clears private view and drafts immediately on session loss and requires refreshed explicit input', async () => {
+    const order = orderFixture(); order.parties[0]!.addressReady = true;
+    const h = harness(order); render(<OrderDetailPage api={h.api} orderId={order.id} />);
+    await screen.findByLabelText('收件人');
+    for (const [label, value] of [['收件人', '甲草稿'], ['电话', '13811112222'], ['地区', '测试地区'], ['详细地址', '甲私有草稿'], ['操作原因', '甲的取消原因']]) fireEvent.input(screen.getByLabelText(label!), { target: { value } });
+    h.request.mockResolvedValueOnce({ statusCode: 200, data: { orderId: order.id, side: 'INITIATOR', version: 1, recipientName: '甲私有视图', phone: '13811112222', region: '测试地区', detail: '甲私有已存地址' } });
+    fireEvent.click(screen.getByRole('button', { name: '查看我的收货资料' })); await screen.findByText(/甲私有已存地址/);
+    act(() => h.session.clear());
+    expect(screen.queryByText(/甲私有已存地址/)).not.toBeInTheDocument(); expect(screen.queryByLabelText('收件人')).not.toBeInTheDocument();
+    expect(h.api.getPendingCommand(order.id, id(10))).toBeNull();
+    h.session.setAccessToken('B', 900); h.setActor(id(11));
+    fireEvent.click(screen.getByRole('button', { name: '刷新订单' })); await screen.findByText('接收方（我）进度');
+    for (const label of ['收件人', '电话', '地区', '详细地址', '操作原因']) expect(screen.getByLabelText(label)).toHaveValue('');
+    expect(screen.getByRole('button', { name: '保存我的收货资料' })).toHaveAttribute('aria-disabled', 'true'); expect(h.calls.filter(c => c.method === 'POST')).toHaveLength(0);
+  });
+  it('stops automatic A-to-B address submission and waits for refresh and new confirmation', async () => {
+    const h = harness(); render(<OrderDetailPage api={h.api} orderId={id(20)} />); await screen.findByLabelText('收件人');
+    await h.api.authenticate({ getCode: async () => 'refreshed-code' });
+    for (const [label, value] of [['收件人', '甲草稿'], ['电话', '13811112222'], ['地区', '测试地区'], ['详细地址', '甲私有草稿']]) fireEvent.input(screen.getByLabelText(label!), { target: { value } });
+    h.request.mockImplementationOnce(async options => { h.calls.push(options); return { statusCode: 401, data: {} }; });
+    h.request.mockResolvedValueOnce({ statusCode: 201, data: { accessToken: 'B', expiresIn: 900, user: { id: id(11), roles: ['CUSTOMER'] } } });
+    fireEvent.click(screen.getByRole('button', { name: '保存我的收货资料' }));
+    await screen.findByText('登录身份已变化或无法核实，请刷新订单并重新确认操作。');
+    expect(screen.queryByLabelText('收件人')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '重试原操作' })).not.toBeInTheDocument();
+    h.setActor(id(11)); fireEvent.click(screen.getByRole('button', { name: '刷新订单' })); await screen.findByLabelText('收件人');
+    expect(screen.getByLabelText('收件人')).toHaveValue(''); expect(h.calls.filter(c => c.method === 'POST')).toHaveLength(1);
+    for (const [label, value] of [['收件人', '乙新确认'], ['电话', '13911112222'], ['地区', '乙地区'], ['详细地址', '乙明确填写地址']]) fireEvent.input(screen.getByLabelText(label!), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: '保存我的收货资料' })); await waitFor(() => expect(h.calls.filter(c => c.method === 'POST')).toHaveLength(2));
+    const posts = h.calls.filter(c => c.method === 'POST'); expect(posts[1].data).toMatchObject({ recipientName: '乙新确认' }); expect(posts[1].header?.['Idempotency-Key']).not.toBe(posts[0].header?.['Idempotency-Key']);
+  });
   // Removing the real mine entry strands confirmed customers outside the order flow.
   it('opens my orders from the existing mine workbench', async () => {
     const navigate = vi.fn();
@@ -250,7 +288,6 @@ describe('customer order entry', () => {
     const h = harness(order); render(<OrderDetailPage api={h.api} orderId={order.id} />); await screen.findByRole('button', { name: '查看我的收货资料' });
     let finishIdentity!: (value: { statusCode: number; data: unknown }) => void;
     let finishAddress!: (value: { statusCode: number; data: unknown }) => void;
-    h.request.mockImplementationOnce(async options => { h.calls.push(options); return { statusCode: 200, data: order }; });
     h.request.mockImplementationOnce(options => { h.calls.push(options); return new Promise(resolve => { finishIdentity = resolve; }); });
     fireEvent.click(screen.getByRole('button', { name: '刷新订单' }));
     h.request.mockImplementationOnce(options => { h.calls.push(options); return new Promise(resolve => { finishAddress = resolve; }); });

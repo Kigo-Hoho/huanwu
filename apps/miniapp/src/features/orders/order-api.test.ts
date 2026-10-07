@@ -8,7 +8,7 @@ const address = { expectedVersion: 1, recipientName: '测试甲', phone: '138000
 function harness() {
   const stored = new Map<string, unknown>();
   const storage = { getStorageSync: (key: string) => stored.get(key), setStorageSync: (key: string, value: unknown) => { stored.set(key, value); }, removeStorageSync: (key: string) => { stored.delete(key); } };
-  const session = new Session(storage); session.setAccessToken('token', 900);
+  const session = new Session(storage); session.setAccessToken('token', 900, id(10));
   const request = vi.fn().mockResolvedValue({ statusCode: 200, data: { order } });
   const client = new AuthenticatedApiClient('http://localhost:3000', session, request);
   return { api: new OrderApi(client), request, client, stored };
@@ -62,7 +62,7 @@ describe('order transport and logical commands', () => {
   });
   it('retries a 401 through existing authentication with exactly the same key and body', async () => {
     const { api, request, client } = harness(); await client.authenticate({ getCode: async () => 'code' });
-    request.mockResolvedValueOnce({ statusCode: 401, data: {} }).mockResolvedValueOnce({ statusCode: 201, data: { accessToken: 'fresh', expiresIn: 900 } });
+    request.mockResolvedValueOnce({ statusCode: 401, data: {} }).mockResolvedValueOnce({ statusCode: 201, data: { accessToken: 'fresh', expiresIn: 900, user: { id: id(10), roles: ['CUSTOMER'] } } });
     await api.startPayment(order.id, { expectedVersion: 1, purpose: 'DEPOSIT' });
     expect(request.mock.calls[2]![0]).toMatchObject({ data: request.mock.calls[0]![0].data, header: { Authorization: 'Bearer fresh', 'Idempotency-Key': request.mock.calls[0]![0].header['Idempotency-Key'] } });
   });
