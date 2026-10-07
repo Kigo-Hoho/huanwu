@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../audit/audit.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { ItemReviewService } from './item-review.service.js';
+import { phase3DatabaseName, validateDatabaseName } from '../../test/phase3/support/database-fixtures.js';
 
 describe('ItemReviewService', () => {
   let service: ItemReviewService;
@@ -15,37 +16,11 @@ describe('ItemReviewService', () => {
   let ownerId: string;
   let reviewerId: string;
 
-  async function cleanup(): Promise<void> {
-    const users = await prisma.user.findMany({
-      where: {
-        OR: [
-          { wechatOpenid: { startsWith: fixtureMarker } },
-          { adminCredential: { email: { startsWith: fixtureMarker } } },
-        ],
-      },
-      select: { id: true },
-    });
-    const userIds = users.map(({ id }) => id);
-    if (userIds.length === 0) return;
-    const itemIds = (
-      await prisma.item.findMany({
-        where: { ownerId: { in: userIds } },
-        select: { id: true },
-      })
-    ).map(({ id }) => id);
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { actorId: { in: userIds } },
-          { entityType: 'Item', entityId: { in: itemIds } },
-        ],
-      },
-    });
-    await prisma.item.deleteMany({ where: { id: { in: itemIds } } });
-    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-  }
-
   beforeAll(async () => {
+    const name = phase3DatabaseName(process.env.DATABASE_URL!);
+    expect(name.startsWith('barter_p3_')).toBe(true);
+    validateDatabaseName(name, process.env.PHASE3_NAMESPACE!);
+    expect(name).not.toBe(process.env.PHASE3_TEMPLATE);
     const moduleRef = await Test.createTestingModule({
       providers: [
         ItemReviewService,
@@ -56,7 +31,6 @@ describe('ItemReviewService', () => {
     service = moduleRef.get(ItemReviewService);
     prisma = moduleRef.get(PrismaService);
     await prisma.$connect();
-    await cleanup();
 
     const owner = await prisma.user.create({
       data: {
@@ -81,7 +55,6 @@ describe('ItemReviewService', () => {
 
   afterAll(async () => {
     if (prisma) {
-      await cleanup();
       await prisma.$disconnect();
     }
   });

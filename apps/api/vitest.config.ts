@@ -5,7 +5,19 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: 'unit', include: ['src/**/*.spec.ts'] },
+        test: {
+          name: 'unit', include: ['src/**/*.spec.ts'],
+          exclude: ['src/audit/audit.service.spec.ts', 'src/items/item-review.service.spec.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'legacy-database-unit',
+          include: ['src/audit/audit.service.spec.ts', 'src/items/item-review.service.spec.ts'],
+          globalSetup: ['test/phase3/support/legacy-database-global-setup.ts'],
+          setupFiles: ['test/phase3/support/legacy-database-setup.ts'],
+        },
       },
       {
         extends: true,

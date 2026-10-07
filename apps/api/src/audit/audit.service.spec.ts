@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AuditService } from './audit.service.js';
 import { PrismaService } from '../database/prisma.service.js';
+import { phase3DatabaseName, validateDatabaseName } from '../../test/phase3/support/database-fixtures.js';
 
 describe('AuditService', () => {
   let auditService: AuditService;
@@ -12,6 +13,10 @@ describe('AuditService', () => {
   const entityId = randomUUID();
 
   beforeAll(async () => {
+    const name = phase3DatabaseName(process.env.DATABASE_URL!);
+    expect(name.startsWith('barter_p3_')).toBe(true);
+    validateDatabaseName(name, process.env.PHASE3_NAMESPACE!);
+    expect(name).not.toBe(process.env.PHASE3_TEMPLATE);
     const moduleRef = await Test.createTestingModule({
       providers: [AuditService, PrismaService],
     }).compile();
@@ -21,10 +26,7 @@ describe('AuditService', () => {
   });
 
   afterAll(async () => {
-    await prisma.auditLog.deleteMany({
-      where: { entityType: 'Task4Fixture' },
-    });
-    await prisma.$disconnect();
+    await prisma?.$disconnect();
   });
 
   it('creates an immutable audit row through the supplied transaction client', async () => {
@@ -49,6 +51,8 @@ describe('AuditService', () => {
       before: { status: 'BEFORE' },
       after: { status: 'AFTER' },
     });
+    await expect(prisma.auditLog.delete({ where: { id: stored.id } })).rejects.toThrow(/immutable/i);
+    await expect(prisma.auditLog.findUnique({ where: { id: stored.id } })).resolves.toMatchObject({ id: stored.id });
   });
 
   it('rolls back the audit row with its surrounding transaction', async () => {

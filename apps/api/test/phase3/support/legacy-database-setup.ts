@@ -3,7 +3,10 @@ import { createPhase3Database } from './database-fixtures.js';
 import { OutboxWorker } from '../../../src/integrations/outbox.worker.js';
 
 // setupFiles run before imports, including files constructing Prisma at module scope.
-if (expect.getState().testPath?.endsWith('.e2e-spec.ts')) {
+const testPath = expect.getState().testPath?.replaceAll('\\', '/');
+if (testPath?.endsWith('.e2e-spec.ts') ||
+    testPath?.endsWith('/src/audit/audit.service.spec.ts') ||
+    testPath?.endsWith('/src/items/item-review.service.spec.ts')) {
   // Legacy tests own isolated file databases and do not exercise background dispatch.
   const workerLifecycle = vi.spyOn(OutboxWorker.prototype, 'onModuleInit').mockImplementation(() => {});
   const originalUrl = process.env.DATABASE_URL;
