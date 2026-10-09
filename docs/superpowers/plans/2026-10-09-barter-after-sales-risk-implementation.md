@@ -75,9 +75,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 ### Task 2: 运营设备会话与动作级重新验证
 
-**Files:** Create `apps/api/src/operator-security/{operator-security.module,operator-security.controller,operator-session.service,operator-device.service,action-grant.service,operator-action.types}.ts`、`apps/api/scripts/approve-operator-device.ts`；Modify `apps/api/src/auth/{auth.service,jwt-auth.guard}.ts`、`apps/api/src/{app.module,main}.ts`、`apps/api/{package.json,tsconfig.json}`（CLI类型检查/lint入口）；Test `apps/api/test/phase4/operator-security.e2e-spec.ts`。
+**Files:** Create `apps/api/src/operator-security/{operator-security.module,operator-security.controller,operator-session.service,operator-device.service,action-grant.service,operator-action.types}.ts`、`apps/api/scripts/approve-operator-device.ts`；Modify `apps/api/src/auth/{auth.service,jwt-auth.guard}.ts`、`apps/api/src/{app.module,main}.ts`、`apps/api/{package.json,tsconfig.json}`（CLI类型检查/lint入口）；校正尚未发布的 `packages/contracts/src/operator-security.ts` 及测试的多资源版本签发契约，必要时最小修改 schema 与本阶段新迁移以保存完整绑定；Test `apps/api/test/phase4/operator-security.e2e-spec.ts`。
 
 **Interfaces:** Produces `OperatorActionContext = {actor: AuthenticatedUser; sessionId: string; deviceId: string; grantId: string}`；`ActionGrantService.consume(tx, context, binding): Promise<void>`，binding 精确包含 action/resourceId/expectedVersions/requestHash；`OperatorSessionService.assertCurrent(tx, context, capability): Promise<void>`。登录响应不返回设备 secret；服务器 CLI `approveDevice(deviceId, reason)` 只批准既有待批记录并审计。
+
+执行裁定（2026-10-09）：尚未发布的签发 DTO 统一为严格 `expectedVersions/requestHash`，不增加旧单版本输入兼容；消费端按服务端规范化业务输入计算摘要。新增独立 POST `/api/admin/security/login` 及共享登录输入/结果承载绑定设备的 sid 会话，保留原无 sid 低风险登录行为；新增路由不接受客户端自行声明桌面能力。原因是 Task1 的单版本 DTO 不能表达本任务要求的完整动作绑定，既有 auth 返回又须保持兼容。
 
 - [ ] **Step 1: 写失败测试。** `expect(await h.mobileGrant('APPROVE_FUNDS')).toMatchObject({status:403})`；伪造 User-Agent/deviceKind 不提升权限；密码重验后 grant 5 分钟过期，换资源/内容/账号拒绝；设备/角色撤销即时失效；审计失败不消费 grant；15/30 分钟边界测试。
 - [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/operator-security.e2e-spec.ts`，确认新安全入口/授权行为尚缺失。
