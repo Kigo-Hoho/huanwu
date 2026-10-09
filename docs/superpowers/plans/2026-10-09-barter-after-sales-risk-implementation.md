@@ -85,11 +85,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 移动会话只批准紧急止损类 grant；`UNFREEZE_TRADING` 属于恢复，要求受信桌面，角色保留 REVIEWER/SUPER_ADMIN。`RESUME_ORDER` 要求桌面 SUPER_ADMIN。新增移动拒绝及桌面合法解冻的行为测试，不能让桌面能力替代角色授权。
 
-- [ ] **Step 1: 写失败测试。** `expect(await h.mobileGrant('APPROVE_FUNDS')).toMatchObject({status:403})`；伪造 User-Agent/deviceKind 不提升权限；密码重验后 grant 5 分钟过期，换资源/内容/账号拒绝；设备/角色撤销即时失效；审计失败不消费 grant；15/30 分钟边界测试。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/operator-security.e2e-spec.ts`，确认新安全入口/授权行为尚缺失。
-- [ ] **Step 3: 实现服务。** 设备登记生成随机绑定凭据，只存摘要，HttpOnly cookie（生产 Secure、受限 SameSite）；敏感会话必须携带有效 sid 和绑定 cookie，不接受客户端任意 deviceId。配置明确允许的运营 origin，跨域凭证/CORS/CSRF 校验不使用通配；开发本地例外仅非生产。移动默认权限、运维 CLI 首次批准、受信超级管理员非自批后续批准/撤销。旧无 sid token 只保留既有低风险查询/审核，不能获得第四阶段敏感权限。grant 绑定业务输入摘要（不含 grant 本身与密码），消费在业务事务内，成功幂等重试仍检查当前权限。CLI 执行只针对自有测试库，不对保留库自动批准。
-- [ ] **Step 4: GREEN。** 重跑 Step 2 和 `npm exec --workspace @barter/api -- vitest run --config vitest.config.ts test/auth-rbac.e2e-spec.ts`。测试辅助补齐 `operatorLogin`、`enrollOwnedDevice`、`grant`，走真实 API/受控 CLI，不给生产加测试授权后门。
-- [ ] **Step 5: 审查与提交。** `feat: add operator sessions and action-bound reauthentication`。
+- [x] **Step 1: 写失败测试。** `expect(await h.mobileGrant('APPROVE_FUNDS')).toMatchObject({status:403})`；伪造 User-Agent/deviceKind 不提升权限；密码重验后 grant 5 分钟过期，换资源/内容/账号拒绝；设备/角色撤销即时失效；审计失败不消费 grant；15/30 分钟边界测试。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/operator-security.e2e-spec.ts`，确认新安全入口/授权行为尚缺失。
+- [x] **Step 3: 实现服务。** 设备登记生成随机绑定凭据，只存摘要，HttpOnly cookie（生产 Secure、受限 SameSite）；敏感会话必须携带有效 sid 和绑定 cookie，不接受客户端任意 deviceId。配置明确允许的运营 origin，跨域凭证/CORS/CSRF 校验不使用通配；开发本地例外仅非生产。移动默认权限、运维 CLI 首次批准、受信超级管理员非自批后续批准/撤销。旧无 sid token 只保留既有低风险查询/审核，不能获得第四阶段敏感权限。grant 绑定业务输入摘要（不含 grant 本身与密码），消费在业务事务内，成功幂等重试仍检查当前权限。CLI 执行只针对自有测试库，不对保留库自动批准。
+- [x] **Step 4: GREEN。** 重跑 Step 2 和 `npm exec --workspace @barter/api -- vitest run --config vitest.config.ts test/auth-rbac.e2e-spec.ts`。测试辅助补齐 `operatorLogin`、`enrollOwnedDevice`、`grant`，走真实 API/受控 CLI，不给生产加测试授权后门。
+- [x] **Step 5: 审查与提交。** `feat: add operator sessions and action-bound reauthentication`。
 
 ### Task 3: 工单创建、自有查询及基础处理状态
 
@@ -255,7 +255,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Task 1 已完成，Tasks 2～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～2 已完成，Tasks 3～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
 
 ### Task 1 实际结果
 
@@ -266,3 +266,12 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - 原三份历史迁移未改；各阶段测试源库表计数/迁移记录不变、归属临时库全部清理。该证明不是源数据逐行快照。没有 reset、强制 DROP、SQLite 或真实外部资金业务。
 - 普通 Git 行尾提示仍有记录，不是测试 warning。非阻断项：REJECT 理由 null 的 SQL CHECK 留 Task5 补行为测试与约束；旧持久化测试的前序数据依赖留整分支审查核对。
 - 兼容性裁定：`applyMigrations` 默认仍执行所有当前迁移，仅历史三迁移测试显式指定数量3；Phase4 复用经过清理验证的 Phase3 归属库工具及订单 HTTP 测试流程。
+
+### Task 2 实际结果（2026-10-10）
+
+- 产品提交：`d322260`（运营会话、设备及动作授权）；`39279d1`（完整分页、永久首次初始化边界）。中间文档澄清提交：`3eb8a1d`、`d7e7a75`、`47ab8b5`、`3e785b5`。
+- 新 sid 登录、随机设备绑定、当前权限重读、15/30分钟会话、5分钟单次完整版本/内容授权；设备/本人会话版本、同事务审计及幂等，精确Origin及生产Secure/HttpOnly/Strict-cookie。保留旧无sid低风险路径，无匿名批准和客户端自授桌面能力。
+- RED：缺少路由4项、完整签发契约1项、撤销版本及误传非事务客户端、移动解冻2项都实际观察失败。首轮全仓失败为旧固定迁移总数4/实际5，已改为历史三迁移name/checksum/finishedAt保留和回填迁移存在；不改原迁移。
+- GREEN：原候选最终全仓 `npm test` 702项退出0；旧auth11项、最终专项28项及API lint/typecheck通过。独立审查修正后安全文件28项、共享契约3项及API lint/typecheck通过；702不是修正后的全仓结果。测试库隔离/普通清理证明均通过，未操作保留库。
+- 两项独立审查发现分页缺失和bootstrap全部撤销后重开，两位新的独立复查代理确认均修正、无新增阻断。真实HTTP分页覆盖57条和相同时间、默认20/最多50、无重复遗漏/跨账号隔离；真实CLI验证永久关闭、审计失败首次重试和并发仅一次。
+- 原非阻断压行问题留整分支审查；弱隐私断言已加强；Git行尾提示保留说明。Cookie同站部署约束、非硬件/MFA能力不能隐去。全部受信设备丢失后没有自动恢复入口，第五阶段另需明确安全恢复机制。
