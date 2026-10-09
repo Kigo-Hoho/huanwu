@@ -14,6 +14,18 @@ export const OperatorDeviceCommandSchema = z.strictObject({ expectedVersion: z.n
 export const OperatorDeviceEnrollmentSchema = z.strictObject({});
 export const OperatorSessionRevokeSchema = z.strictObject({ expectedVersion: z.number().int().positive(), reason: z.string().trim().min(1).max(2000) });
 export const OperatorSessionViewSchema = z.strictObject({ id: uuid, version: z.number().int().positive(), deviceId: uuid, capability: OperatorCapabilitySchema, expiresAt: time });
+export const OperatorSecurityCursorSchema = z.string().max(80).refine(value => {
+  const [createdAt, id, ...extra] = value.split('~');
+  const milliseconds = Date.parse(createdAt);
+  return extra.length === 0 && time.safeParse(createdAt).success && Number.isFinite(milliseconds)
+    && new Date(milliseconds).toISOString() === createdAt && uuid.safeParse(id).success && id === id.toLowerCase();
+}, 'Invalid operator security cursor');
+export const OperatorSecurityListInputSchema = z.strictObject({
+  cursor: OperatorSecurityCursorSchema.optional(),
+  limit: z.union([z.number(), z.string().regex(/^[1-9][0-9]*$/).transform(Number)]).pipe(z.number().int().min(1).max(50)).default(20),
+});
+export const OperatorDeviceListResultSchema = z.strictObject({ items: z.array(OperatorDeviceViewSchema).max(50), nextCursor: OperatorSecurityCursorSchema.nullable() });
+export const OperatorSessionListResultSchema = z.strictObject({ items: z.array(OperatorSessionViewSchema).max(50), nextCursor: OperatorSecurityCursorSchema.nullable() });
 export const ActionGrantViewSchema = z.strictObject({ id: uuid, action: OperatorActionSchema, resourceId: uuid, expectedVersions: OperatorExpectedVersionsSchema, expiresAt: time });
 export const OperatorLoginRequestSchema = z.strictObject({ email: z.email().trim().toLowerCase(), password: z.string().min(1).max(500) });
 export const OperatorLoginResultSchema = z.strictObject({ accessToken: z.string().min(1), expiresIn: z.number().int().positive(), user: z.strictObject({ id: uuid, roles: z.array(z.enum(['OPERATIONS', 'REVIEWER', 'SUPER_ADMIN'])).min(1) }), operatorSession: OperatorSessionViewSchema });
@@ -29,3 +41,6 @@ export type OperatorLoginRequest = z.infer<typeof OperatorLoginRequestSchema>;
 export type OperatorLoginResult = z.infer<typeof OperatorLoginResultSchema>;
 export type OperatorDeviceCommand = z.infer<typeof OperatorDeviceCommandSchema>;
 export type OperatorSessionRevoke = z.infer<typeof OperatorSessionRevokeSchema>;
+export type OperatorSecurityListInput = z.infer<typeof OperatorSecurityListInputSchema>;
+export type OperatorDeviceListResult = z.infer<typeof OperatorDeviceListResultSchema>;
+export type OperatorSessionListResult = z.infer<typeof OperatorSessionListResultSchema>;

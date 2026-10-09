@@ -1,5 +1,5 @@
-import { ActionGrantRequestSchema, OperatorDeviceCommandSchema, OperatorDeviceEnrollmentSchema, OperatorSessionRevokeSchema, OperatorLoginRequestSchema, type ActionGrantRequest } from '@barter/contracts';
-import { Body, Controller, ForbiddenException, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { ActionGrantRequestSchema, OperatorDeviceCommandSchema, OperatorDeviceEnrollmentSchema, OperatorSessionRevokeSchema, OperatorLoginRequestSchema, OperatorSecurityListInputSchema, OperatorDeviceListResultSchema, OperatorSessionListResultSchema, type ActionGrantRequest, type OperatorSecurityListInput } from '@barter/contracts';
+import { Body, Controller, ForbiddenException, Get, Headers, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from '../auth/auth.service.js';
 import { JwtAuthGuard, type AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
@@ -39,16 +39,31 @@ export class OperatorSecurityController {
   @Get('devices')
   @Roles('OPERATIONS', 'REVIEWER', 'SUPER_ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  async devices(@Req() request: AuthenticatedRequest) {
+  async devices(@Query(new ZodValidationPipe(OperatorSecurityListInputSchema)) query: OperatorSecurityListInput, @Req() request: AuthenticatedRequest) {
     const context = requireOperatorSession(request);
-    return (await this.prisma.operatorDevice.findMany({ where: { actorId: context.actor.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 50 })).map(deviceView);
+    const rows = await this.prisma.operatorDevice.findMany({
+      where: { actorId: context.actor.id, ...cursorBoundary(query.cursor) },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
+    });
+    const page = rows.slice(0, query.limit);
+    return OperatorDeviceListResultSchema.parse({ items: page.map(deviceView), nextCursor: rows.length > query.limit ? encodeCursor(page[page.length - 1]) : null });
   }
   @Get('sessions')
   @Roles('OPERATIONS', 'REVIEWER', 'SUPER_ADMIN')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  async listSessions(@Req() request: AuthenticatedRequest) {
+  async listSessions(@Query(new ZodValidationPipe(OperatorSecurityListInputSchema)) query: OperatorSecurityListInput, @Req() request: AuthenticatedRequest) {
     const context = requireOperatorSession(request);
-    return (await this.prisma.operatorSession.findMany({ where: { actorId: context.actor.id, revokedAt: null }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 50 })).map(({ id, version, deviceId, capability, expiresAt }) => ({ id, version, deviceId, capability, expiresAt: expiresAt.toISOString() }));
+    const rows = await this.prisma.operatorSession.findMany({
+      where: { actorId: context.actor.id, revokedAt: null, ...cursorBoundary(query.cursor) },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
+    });
+    const page = rows.slice(0, query.limit);
+    return OperatorSessionListResultSchema.parse({
+      items: page.map(({ id, version, deviceId, capability, expiresAt }) => ({ id, version, deviceId, capability, expiresAt: expiresAt.toISOString() })),
+      nextCursor: rows.length > query.limit ? encodeCursor(page[page.length - 1]) : null,
+    });
   }
   @Post('grants')
   @HttpCode(200)
@@ -88,4 +103,13 @@ export class OperatorSecurityController {
     assertOperatorOrigin(request);
     return this.deviceService.revokeSession(context, id, body, key);
   }
+}
+function cursorBoundary(cursor: string | undefined) {
+  if (!cursor) return {};
+  const [createdAt, id] = cursor.split('~');
+  const time = new Date(createdAt);
+  return { OR: [{ createdAt: { lt: time } }, { createdAt: time, id: { lt: id } }] };
+}
+function encodeCursor(row: { createdAt: Date; id: string }): string {
+  return `${row.createdAt.toISOString()}~${row.id}`;
 }

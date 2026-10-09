@@ -1,12 +1,62 @@
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { OperatorDeviceListResultSchema, OperatorSessionListResultSchema } from '@barter/contracts';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createAfterSalesHarness, type AfterSalesHarness } from './support/after-sales-harness.js';
 import { ActionGrantService } from '../../src/operator-security/action-grant.service.js';
 import { OperatorSessionService } from '../../src/operator-security/operator-session.service.js';
 import { operatorRequestHash, type ActionBinding, type OperatorActionContext } from '../../src/operator-security/operator-action.types.js';
+
+describe('owned operator security pagination', () => {
+  let h: AfterSalesHarness;
+  let own: Awaited<ReturnType<AfterSalesHarness['operatorLogin']>>;
+  let other: typeof own;
+  const devices = Array.from({ length: 56 }, (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`);
+  const sessions = Array.from({ length: 56 }, (_, i) => `00000000-0000-4000-8000-${String(i + 1001).padStart(12, '0')}`);
+  beforeAll(async () => {
+    h = await createAfterSalesHarness();
+    own = await h.operatorLogin();
+    other = await h.operatorLogin(h.actors.superAdminTwo);
+    const createdAt = new Date('2026-10-08T12:00:00.000Z');
+    await h.prisma.operatorDevice.createMany({ data: devices.map((id, i) => ({ id, actorId: h.actors.superAdminOne.id, credentialDigest: String(i + 1).padStart(64, '0'), createdAt })) });
+    await h.prisma.operatorSession.createMany({ data: sessions.map((id, i) => ({ id, actorId: h.actors.superAdminOne.id, deviceId: devices[i], capability: 'MOBILE_LIMITED', createdAt, expiresAt: new Date('2026-10-08T12:15:00.000Z') })) });
+  });
+  afterAll(async () => { await h?.close(); });
+  const read = (path: string, query: object = {}, session = own) => request(h.app.getHttpServer()).get(`/api/admin/security/${path}`).set('Authorization', `Bearer ${session.token}`).set('Cookie', session.cookie).query(query);
+  it.each(['devices', 'sessions'])('paginates every owned %s record with stable time/id ordering and no foreign records', async path => {
+    const expected = path === 'devices' ? [own.response.body.operatorSession.deviceId, ...devices.slice().reverse()] : [own.response.body.operatorSession.id, ...sessions.slice().reverse()];
+    const foreign = path === 'devices' ? other.response.body.operatorSession.deviceId : other.response.body.operatorSession.id;
+    const first = await read(path).expect(200);
+    expect(first.body.items).toHaveLength(20);
+    expect((await read(path, { limit: 50 }).expect(200)).body.items).toHaveLength(50);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const response: request.Response = await read(path, { limit: 17, ...(cursor ? { cursor } : {}) }).expect(200);
+      const page = (path === 'devices' ? OperatorDeviceListResultSchema : OperatorSessionListResultSchema).parse(response.body);
+      expect(page.items.length).toBeLessThanOrEqual(17);
+      for (const item of page.items) {
+        expect(item.id).not.toBe(foreign);
+        expect(item).not.toHaveProperty('actorId');
+        expect(item).not.toHaveProperty('credentialDigest');
+      }
+      seen.push(...page.items.map(item => item.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(expected);
+    expect(new Set(seen).size).toBe(57);
+    const foreignCursor = (await read(path, { limit: 1 }).expect(200)).body.nextCursor;
+    const otherPage = await read(path, { cursor: foreignCursor, limit: 50 }, other).expect(200);
+    expect(otherPage.body.items.every((item: { id: string }) => !expected.includes(item.id))).toBe(true);
+  });
+  it.each(['devices', 'sessions'])('rejects invalid %s pagination queries', async path => {
+    for (const query of [{ limit: 0 }, { limit: 51 }, { limit: '1.5' }, { limit: '' }, { limit: ['1', '2'] }, { cursor: 'invalid' }, { cursor: '2026-10-08T12:00:00.000Z~invalid' }, { cursor: `2026-99-99T00:00:00.000Z~${devices[0]}` }, { cursor: '' }, { actorId: h.actors.superAdminTwo.id }]) {
+      expect((await read(path, query)).status).toBe(400);
+    }
+  });
+});
 
 describe('operator security HTTP boundary', () => {
   let h: AfterSalesHarness;
@@ -82,15 +132,16 @@ describe('operator security HTTP boundary', () => {
   });
   it('keeps device/session reads private and credentials out of responses and audits', async () => {
     const s = await h.operatorLogin(h.actors.superAdminTwo);
+    const foreign = await h.operatorLogin(h.actors.superAdminOne);
     const read = (path: string) => request(h.app.getHttpServer()).get(`/api/admin/security/${path}`).set('Authorization', `Bearer ${s.token}`).set('Cookie', s.cookie);
-    const devices = await read('devices').expect(200);
-    const sessions = await read('sessions').expect(200);
-    expect(devices.body.every((d: { id: string }) => d.id !== s.response.body.operatorSession.deviceId || !('credentialDigest' in d))).toBe(true);
-    expect(sessions.body.every((v: { deviceId: string }) => devices.body.some((d: { id: string }) => d.id === v.deviceId))).toBe(true);
+    const devices = OperatorDeviceListResultSchema.parse((await read('devices').expect(200)).body);
+    const sessions = OperatorSessionListResultSchema.parse((await read('sessions').expect(200)).body);
+    expect(devices.items.map(d => d.id)).not.toContain(foreign.response.body.operatorSession.deviceId);
+    expect(sessions.items.map(v => v.id)).not.toContain(foreign.response.body.operatorSession.id);
     const audit = JSON.stringify(await h.prisma.auditLog.findMany());
     const idempotency = JSON.stringify(await h.prisma.idempotencyRecord.findMany());
     for (const secret of [h.operatorPassword, s.cookie.split('=')[1], s.token]) {
-      expect(JSON.stringify([devices.body, sessions.body, s.response.body.user, audit, idempotency])).not.toContain(secret);
+      expect(JSON.stringify([devices, sessions, s.response.body.user, audit, idempotency])).not.toContain(secret);
     }
   });
   it('uses secure cookies and exact allowed origins in production', async () => {
@@ -106,6 +157,81 @@ describe('operator security HTTP boundary', () => {
       if (previousMode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousMode;
       if (previousOrigins === undefined) delete process.env.OPERATOR_ORIGINS; else process.env.OPERATOR_ORIGINS = previousOrigins;
     }
+  });
+});
+
+describe('permanent server bootstrap lifecycle', () => {
+  let h: AfterSalesHarness;
+  beforeAll(async () => { h = await createAfterSalesHarness(); });
+  afterAll(async () => { await h?.close(); });
+  function cliApprove(id: string): Promise<number | null> {
+    return new Promise((resolveExit, reject) => {
+      const child = spawn(process.execPath, [resolve('../../node_modules/tsx/dist/cli.mjs'), 'scripts/approve-operator-device.ts', id, 'owned fixture permanent bootstrap'], { cwd: process.cwd(), env: process.env, stdio: 'ignore', windowsHide: true });
+      child.once('error', reject);
+      child.once('close', resolveExit);
+    });
+  }
+  it('keeps bootstrap permanently closed after all trusted devices are revoked', async () => {
+    const mobile = await h.operatorLogin();
+    const id = mobile.response.body.operatorSession.deviceId;
+    expect(await cliApprove(id)).toBe(0);
+    const desktop = await h.operatorLogin(h.actors.superAdminOne, mobile.cookie);
+    const device = await h.prisma.operatorDevice.findUniqueOrThrow({ where: { id } });
+    const input = { expectedVersion: device.version, reason: 'revoke the last trusted owned device' };
+    const grant = await h.grant(desktop, { action: 'REVOKE_DEVICE', resourceId: id, expectedVersions: { expectedVersion: device.version }, requestHash: operatorRequestHash(input) }).expect(200);
+    await h.securityCommand(desktop, `devices/${id}/revoke`, { ...input, operatorAction: { sessionId: desktop.response.body.operatorSession.id, grantId: grant.body.id } }).expect(200);
+    expect(await h.prisma.operatorDevice.count({ where: { status: 'APPROVED' } })).toBe(0);
+    const another = await h.operatorLogin(h.actors.superAdminTwo);
+    const target = another.response.body.operatorSession.deviceId;
+    expect(await cliApprove(target)).not.toBe(0);
+    expect((await h.prisma.operatorDevice.findUniqueOrThrow({ where: { id: target } })).status).toBe('PENDING');
+    expect(await h.prisma.auditLog.count({ where: { action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED' } })).toBe(1);
+    await expect(h.prisma.auditLog.deleteMany({ where: { action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED' } })).rejects.toThrow();
+  });
+});
+
+describe('atomic first bootstrap facts', () => {
+  let h: AfterSalesHarness;
+  beforeEach(async () => { h = await createAfterSalesHarness(); });
+  afterEach(async () => { await h?.close(); });
+  function cliApprove(id: string): Promise<number | null> {
+    return new Promise((resolveExit, reject) => {
+      const child = spawn(process.execPath, [resolve('../../node_modules/tsx/dist/cli.mjs'), 'scripts/approve-operator-device.ts', id, 'owned fixture atomic bootstrap'], { cwd: process.cwd(), env: process.env, stdio: 'ignore', windowsHide: true });
+      child.once('error', reject);
+      child.once('close', resolveExit);
+    });
+  }
+  it('rolls back a real CLI audit failure and allows the same pending device to retry its true first approval', async () => {
+    const first = await h.operatorLogin();
+    const firstId = first.response.body.operatorSession.deviceId;
+    // Fault injection belongs only to this harness-owned temporary database.
+    await h.prisma.$executeRawUnsafe(`CREATE FUNCTION phase4_test_reject_bootstrap_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='OPERATOR_DEVICE_BOOTSTRAP_APPROVED' THEN RAISE EXCEPTION 'owned fixture audit unavailable'; END IF; RETURN NEW; END; $$`);
+    await h.prisma.$executeRawUnsafe(`CREATE TRIGGER phase4_test_bootstrap_audit_fault BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION phase4_test_reject_bootstrap_audit()`);
+    try {
+      expect(await cliApprove(firstId)).not.toBe(0);
+      expect(await h.prisma.operatorDevice.findUniqueOrThrow({ where: { id: firstId } })).toMatchObject({ status: 'PENDING', version: 1 });
+      expect(await h.prisma.auditLog.count({ where: { action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED' } })).toBe(0);
+    } finally {
+      await h.prisma.$executeRawUnsafe('DROP TRIGGER phase4_test_bootstrap_audit_fault ON "AuditLog"');
+      await h.prisma.$executeRawUnsafe('DROP FUNCTION phase4_test_reject_bootstrap_audit()');
+    }
+    expect(await cliApprove(firstId)).toBe(0);
+    expect((await h.prisma.operatorDevice.findUniqueOrThrow({ where: { id: firstId } })).status).toBe('APPROVED');
+    expect(await h.prisma.auditLog.count({ where: { action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED' } })).toBe(1);
+  });
+  it('permits only one concurrent true first CLI approval', async () => {
+    const first = await h.operatorLogin();
+    const second = await h.operatorLogin(h.actors.superAdminTwo);
+    const firstId = first.response.body.operatorSession.deviceId;
+    const secondId = second.response.body.operatorSession.deviceId;
+    const results = await Promise.all([cliApprove(firstId), cliApprove(secondId)]);
+    expect(results.filter(code => code === 0)).toHaveLength(1);
+    expect(results.filter(code => code !== 0)).toHaveLength(1);
+    expect(await h.prisma.operatorDevice.count({ where: { status: 'APPROVED' } })).toBe(1);
+    expect(await h.prisma.auditLog.count({ where: { action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED' } })).toBe(1);
+    const persisted = await h.prisma.operatorDevice.findMany({ where: { id: { in: [firstId, secondId] } } });
+    expect(persisted.filter(device => device.status === 'APPROVED' && device.version === 2)).toHaveLength(1);
+    expect(persisted.filter(device => device.status === 'PENDING' && device.version === 1)).toHaveLength(1);
   });
 });
 

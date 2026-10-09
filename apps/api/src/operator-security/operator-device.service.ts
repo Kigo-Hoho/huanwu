@@ -26,7 +26,16 @@ export class OperatorDeviceService {
       await tx.$queryRaw`SELECT id FROM "OperatorDevice" WHERE id = ${id}::uuid FOR UPDATE`;
       const device = await tx.operatorDevice.findUnique({ where: { id }, include: { actor: { include: { roles: true, adminCredential: true } } } });
       if (!device || device.status !== 'PENDING') throw new NotFoundException('Existing pending device required');
-      if (await tx.operatorDevice.count({ where: { status: 'APPROVED', capability: 'DESKTOP_PRIVILEGED' } })) throw new ForbiddenException('Bootstrap approval is closed; use a trusted administrator');
+      // The immutable initialization fact survives all later device revocations.
+      // Read it after the common transaction lock so concurrent CLI attempts
+      // cannot both initialize. A failed audit rolls this fact and approval back.
+      const initialized = await tx.auditLog.findFirst({
+        where: { action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED', entityType: 'OperatorDevice' },
+        select: { id: true },
+      });
+      if (initialized || await tx.operatorDevice.count({ where: { status: 'APPROVED', capability: 'DESKTOP_PRIVILEGED' } })) {
+        throw new ForbiddenException('Bootstrap approval is permanently closed; use a trusted administrator');
+      }
       if (device.actor.disabledAt || device.actor.wechatOpenid || !device.actor.adminCredential || device.actor.roles.some(x => x.role === 'CUSTOMER') || !device.actor.roles.some(x => x.role === 'SUPER_ADMIN')) throw new ForbiddenException('Bootstrap requires a current independent super administrator');
       await tx.operatorDevice.update({ where: { id }, data: { status: 'APPROVED', capability: 'DESKTOP_PRIVILEGED', approvedAt: this.clock.now(), version: { increment: 1 } } });
       await this.audit.record(tx, { actorId: null, action: 'OPERATOR_DEVICE_BOOTSTRAP_APPROVED', entityType: 'OperatorDevice', entityId: id, reason: why, before: { status: 'PENDING' }, after: { status: 'APPROVED', capability: 'DESKTOP_PRIVILEGED', channel: 'SERVER_CLI' } });
