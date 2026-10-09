@@ -29,23 +29,40 @@ enum ItemStatus {
 }
 
 model User {
-  id                  String              @id @default(uuid()) @db.Uuid
-  wechatOpenid        String?             @unique
-  displayName         String?
-  disabledAt          DateTime?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  roles               UserRole[]
-  adminCredential     AdminCredential?
-  items               Item[]
-  auditLogs           AuditLog[]
-  idempotencyKeys     IdempotencyRecord[]
-  initiatedProposals  Proposal[]          @relation("ProposalInitiator")
-  receivedProposals   Proposal[]          @relation("ProposalRecipient")
-  respondingProposals Proposal[]          @relation("ProposalResponder")
-  authoredVersions    ProposalVersion[]
-  initiatedOrders     Order[]             @relation("OrderInitiator")
-  receivedOrders      Order[]             @relation("OrderRecipient")
+  afterSalesApplications AfterSalesCase[]         @relation("AfterSalesCase_applicant")
+  caseRecords            CaseRecord[]             @relation("CaseRecord_actor")
+  caseEvidence           CaseEvidence[]           @relation("CaseEvidence_uploader")
+  authoredResolutions    ResolutionVersion[]      @relation("ResolutionVersion_author")
+  resolutionConsents     ResolutionConsent[]      @relation("ResolutionConsent_actor")
+  resolutionApprovals    ResolutionApproval[]     @relation("ResolutionApproval_actor")
+  resolutionExecutions   ResolutionExecution[]    @relation("ResolutionExecution_actor")
+  returnEvents           ReturnEvent[]            @relation("ReturnEvent_actor")
+  riskReports            RiskReport[]             @relation("RiskReport_reporter")
+  riskRecords            RiskRecord[]             @relation("RiskRecord_actor")
+  tradingRestriction     TradingRestriction?      @relation("TradingRestriction_user")
+  issuedRestrictions     TradingRestriction[]     @relation("TradingRestriction_actor")
+  operatorDevices        OperatorDevice[]         @relation("OperatorDevice_actor")
+  approvedDevices        OperatorDevice[]         @relation("OperatorDevice_approvedBy")
+  operatorSessions       OperatorSession[]        @relation("OperatorSession_actor")
+  actionGrants           ActionGrant[]            @relation("ActionGrant_actor")
+  deadlineExtensions     OrderDeadlineExtension[] @relation("OrderDeadlineExtension_actor")
+  id                     String                   @id @default(uuid()) @db.Uuid
+  wechatOpenid           String?                  @unique
+  displayName            String?
+  disabledAt             DateTime?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  roles                  UserRole[]
+  adminCredential        AdminCredential?
+  items                  Item[]
+  auditLogs              AuditLog[]
+  idempotencyKeys        IdempotencyRecord[]
+  initiatedProposals     Proposal[]               @relation("ProposalInitiator")
+  receivedProposals      Proposal[]               @relation("ProposalRecipient")
+  respondingProposals    Proposal[]               @relation("ProposalResponder")
+  authoredVersions       ProposalVersion[]
+  initiatedOrders        Order[]                  @relation("OrderInitiator")
+  receivedOrders         Order[]                  @relation("OrderRecipient")
 }
 
 model UserRole {
@@ -336,13 +353,18 @@ enum ProviderResultStatus {
 }
 
 model Order {
-  id                     String               @id @default(uuid()) @db.Uuid
-  proposalId             String               @unique @db.Uuid
-  proposalVersionId      String               @db.Uuid
-  initiatorId            String               @db.Uuid
-  recipientId            String               @db.Uuid
+  afterSalesCases        AfterSalesCase[]         @relation("AfterSalesCase_order")
+  riskTasks              RiskTask[]               @relation("RiskTask_order")
+  holdBlockers           OrderHoldBlocker[]       @relation("OrderHoldBlocker_order")
+  deadlineExtensions     OrderDeadlineExtension[] @relation("OrderDeadlineExtension_order")
+  completedAt            DateTime?
+  id                     String                   @id @default(uuid()) @db.Uuid
+  proposalId             String                   @unique @db.Uuid
+  proposalVersionId      String                   @db.Uuid
+  initiatorId            String                   @db.Uuid
+  recipientId            String                   @db.Uuid
   status                 OrderStatus
-  version                Int                  @default(1)
+  version                Int                      @default(1)
   rulesVersion           String
   depositFen             Int
   feeFen                 Int
@@ -363,12 +385,12 @@ model Order {
   holdPreviousStatus     OrderStatus?
   heldAt                 DateTime?
   outstandingObligations Json?
-  createdAt              DateTime             @default(now())
-  updatedAt              DateTime             @updatedAt
-  proposal               Proposal             @relation(fields: [proposalId], references: [id], onDelete: Restrict)
-  proposalVersion        ProposalVersion      @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
-  initiator              User                 @relation("OrderInitiator", fields: [initiatorId], references: [id], onDelete: Restrict)
-  recipient              User                 @relation("OrderRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  proposal               Proposal                 @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  proposalVersion        ProposalVersion          @relation(fields: [proposalVersionId], references: [id], onDelete: Restrict)
+  initiator              User                     @relation("OrderInitiator", fields: [initiatorId], references: [id], onDelete: Restrict)
+  recipient              User                     @relation("OrderRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
   items                  OrderItemSnapshot[]
   parties                OrderPartyProgress[]
   addresses              OrderAddress[]
@@ -386,10 +408,11 @@ model Order {
 }
 
 model OrderItemSnapshot {
-  id                String        @id @default(uuid()) @db.Uuid
-  orderId           String        @db.Uuid
-  itemId            String        @db.Uuid
-  ownerId           String        @db.Uuid
+  returnObligations ReturnObligation[] @relation("ReturnObligation_itemSnapshot")
+  id                String             @id @default(uuid()) @db.Uuid
+  orderId           String             @db.Uuid
+  itemId            String             @db.Uuid
+  ownerId           String             @db.Uuid
   side              OrderSide
   sortOrder         Int
   itemVersion       Int
@@ -399,8 +422,8 @@ model OrderItemSnapshot {
   condition         ItemCondition
   wantedText        String
   imageUrls         String[]
-  order             Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  item              Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  order             Order              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  item              Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@unique([orderId, itemId])
   @@unique([orderId, side, sortOrder])
@@ -441,30 +464,33 @@ model OrderAddress {
 }
 
 model PaymentIntent {
-  id                    String           @id @default(uuid()) @db.Uuid
-  orderId               String           @db.Uuid
+  afterSalesExecution   ResolutionExecution?    @relation("ResolutionExecution_originalPayment")
+  compensationReversal  CompensationObligation? @relation("CompensationObligation_originalPayment")
+  id                    String                  @id @default(uuid()) @db.Uuid
+  orderId               String                  @db.Uuid
   side                  OrderSide
   purpose               PaymentPurpose
   amountFen             Int
-  currency              String           @default("CNY")
-  businessNo            String           @unique
+  currency              String                  @default("CNY")
+  businessNo            String                  @unique
   provider              String
-  status                PaymentStatus    @default(CREATED)
+  status                PaymentStatus           @default(CREATED)
   externalTransactionId String?
   checkoutParams        Json?
   paidAt                DateTime?
   closedAt              DateTime?
   refundedAt            DateTime?
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
-  order                 Order            @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  order                 Order                   @relation(fields: [orderId], references: [id], onDelete: Restrict)
   entries               FinancialEntry[]
 
   @@unique([orderId, side, purpose])
 }
 
 model IntegrationEvent {
-  id                    String                   @id @default(uuid()) @db.Uuid
+  compensationEntries   CompensationFinancialEntry[] @relation("CompensationFinancialEntry_integrationEvent")
+  id                    String                       @id @default(uuid()) @db.Uuid
   provider              String
   eventId               String
   kind                  IntegrationEventKind
@@ -473,10 +499,10 @@ model IntegrationEvent {
   externalTransactionId String?
   amountFen             Int?
   currency              String?
-  shipmentId            String?                  @db.Uuid
+  shipmentId            String?                      @db.Uuid
   progress              ShipmentStatus?
   payload               Json
-  createdAt             DateTime                 @default(now())
+  createdAt             DateTime                     @default(now())
   receipt               IntegrationEventReceipt?
   financialEntries      FinancialEntry[]
   shipmentEvents        ShipmentEvent[]
@@ -596,4 +622,609 @@ model SimulatedProviderOperation {
   updatedAt             DateTime                 @updatedAt
 
   @@index([orderId])
+}
+
+enum CaseStatus {
+  OPEN
+  AWAITING_RESPONSE
+  UNDER_REVIEW
+  AWAITING_AGREEMENT
+  EXECUTING
+  RESOLVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ResolutionType {
+  CONTINUE_EXCHANGE
+  RETURN_ORIGINALS
+  KEEP_WITH_COMPENSATION
+  CANCEL_BEFORE_HANDOVER
+  FUNDS_ONLY
+}
+
+enum ResolutionDecision {
+  AGREE
+  REJECT
+}
+
+enum ResolutionResponsibility {
+  NONE
+  INITIATOR
+  RECIPIENT
+  BOTH
+  UNDETERMINED
+}
+
+enum ResolutionOrderOutcome {
+  RESUME
+  CANCEL
+  COMPLETE
+  PRESERVE_TERMINAL
+}
+
+enum ReturnStatus {
+  PENDING
+  REGISTERED
+  COLLECTED
+  DELIVERED
+  CONFIRMED
+  DISPUTED
+  INTERCEPTED
+  UNRETURNABLE
+  UNKNOWN
+}
+
+enum CompensationStatus {
+  PENDING
+  AUTHORIZED
+  COLLECTED
+  TRANSFERRING
+  TRANSFERRED
+  REFUNDING
+  REFUNDED
+  CLOSED
+  UNKNOWN
+  FAILED
+}
+
+enum CompensationFinancialEntryType {
+  COLLECTION
+  TRANSFER
+  REFUND
+}
+
+enum RiskReportStatus {
+  OPEN
+  INVESTIGATING
+  ACTIONED
+  DISMISSED
+}
+
+enum RiskTargetType {
+  ITEM
+  SHIPMENT
+  ORDER
+}
+
+enum RiskReason {
+  PROHIBITED_ITEM
+  FALSE_SHIPMENT
+  FRAUDULENT_TRADE
+  OTHER
+}
+
+enum TradingRestrictionStatus {
+  CLEAR
+  FROZEN
+}
+
+enum RiskTaskStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+}
+
+enum OperatorCapability {
+  MOBILE_LIMITED
+  DESKTOP_PRIVILEGED
+}
+
+enum OperatorDeviceStatus {
+  PENDING
+  APPROVED
+  REVOKED
+}
+
+enum OperatorAction {
+  FREEZE_TRADING
+  UNFREEZE_TRADING
+  UNPUBLISH_ITEM
+  HOLD_ORDER
+  RESUME_ORDER
+  APPROVE_FUNDS
+  EXECUTE_FUNDS
+  APPROVE_DEVICE
+  REVOKE_DEVICE
+}
+
+enum HoldBlockerKind {
+  CASE
+  RISK
+  FUNDS
+  LOGISTICS
+}
+
+enum OrderDeadlineKind {
+  DETAILS
+  PAYMENT
+  FULFILLMENT
+  ACCEPTANCE
+}
+
+model AfterSalesCase {
+  id                       String              @id @default(uuid()) @db.Uuid
+  orderId                  String              @db.Uuid
+  rootDisputeId            String              @default(uuid()) @db.Uuid
+  applicantId              String              @db.Uuid
+  reason                   String
+  status                   CaseStatus          @default(OPEN)
+  version                  Int                 @default(1)
+  currentResolutionVersion Int?
+  responseSide             OrderSide?
+  responseDeadline         DateTime?
+  agreementDeadline        DateTime?
+  closedAt                 DateTime?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  order                    Order               @relation("AfterSalesCase_order", fields: [orderId], references: [id], onDelete: Restrict)
+  applicant                User                @relation("AfterSalesCase_applicant", fields: [applicantId], references: [id], onDelete: Restrict)
+  records                  CaseRecord[]        @relation("CaseRecord_case")
+  evidence                 CaseEvidence[]      @relation("CaseEvidence_case")
+  resolutions              ResolutionVersion[] @relation("ResolutionVersion_case")
+  returnAddresses          ReturnAddress[]     @relation("ReturnAddress_case")
+  riskTasks                RiskTask[]          @relation("RiskTask_case")
+
+  @@index([orderId, createdAt, id])
+  @@index([status, responseDeadline])
+  @@index([rootDisputeId])
+}
+
+model CaseRecord {
+  id          String         @id @default(uuid()) @db.Uuid
+  caseId      String         @db.Uuid
+  actorId     String?        @db.Uuid
+  kind        String
+  description String
+  details     Json?
+  createdAt   DateTime       @default(now())
+  case        AfterSalesCase @relation("CaseRecord_case", fields: [caseId], references: [id], onDelete: Restrict)
+  actor       User?          @relation("CaseRecord_actor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt, id])
+}
+
+model CaseEvidence {
+  id          String          @id @default(uuid()) @db.Uuid
+  caseId      String?         @db.Uuid
+  reportId    String?         @db.Uuid
+  uploaderId  String          @db.Uuid
+  description String
+  originalKey String          @unique
+  displayKey  String          @unique
+  sha256      String
+  bytes       Int
+  mimeType    String
+  width       Int
+  height      Int
+  createdAt   DateTime        @default(now())
+  case        AfterSalesCase? @relation("CaseEvidence_case", fields: [caseId], references: [id], onDelete: Restrict)
+  report      RiskReport?     @relation("CaseEvidence_report", fields: [reportId], references: [id], onDelete: Restrict)
+  uploader    User            @relation("CaseEvidence_uploader", fields: [uploaderId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, uploaderId])
+  @@index([reportId, uploaderId])
+}
+
+model ResolutionVersion {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  caseId                  String                   @db.Uuid
+  number                  Int
+  authorId                String                   @db.Uuid
+  type                    ResolutionType
+  reason                  String
+  rulesVersion            String
+  evidenceIds             String[]                 @db.Uuid
+  itemSnapshotIds         String[]                 @db.Uuid
+  responsibility          ResolutionResponsibility
+  originalFunds           Json
+  returnPlan              Json
+  compensationComponents  Json
+  netCompensationFen      Int
+  compensationPayer       ProposalPayer
+  currency                String                   @default("CNY")
+  orderOutcome            ResolutionOrderOutcome
+  createdAt               DateTime                 @default(now())
+  case                    AfterSalesCase           @relation("ResolutionVersion_case", fields: [caseId], references: [id], onDelete: Restrict)
+  author                  User                     @relation("ResolutionVersion_author", fields: [authorId], references: [id], onDelete: Restrict)
+  consents                ResolutionConsent[]      @relation("ResolutionConsent_resolution")
+  approvals               ResolutionApproval[]     @relation("ResolutionApproval_resolution")
+  executions              ResolutionExecution[]    @relation("ResolutionExecution_resolution")
+  returnObligations       ReturnObligation[]       @relation("ReturnObligation_resolution")
+  returnShipments         ReturnShipment[]         @relation("ReturnShipment_resolution")
+  compensationObligations CompensationObligation[] @relation("CompensationObligation_resolution")
+  deadlineExtensions      OrderDeadlineExtension[] @relation("OrderDeadlineExtension_resolution")
+
+  @@unique([caseId, number])
+}
+
+model ResolutionConsent {
+  id           String             @id @default(uuid()) @db.Uuid
+  resolutionId String             @db.Uuid
+  actorId      String             @db.Uuid
+  side         OrderSide
+  decision     ResolutionDecision
+  reason       String?
+  createdAt    DateTime           @default(now())
+  resolution   ResolutionVersion  @relation("ResolutionConsent_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  actor        User               @relation("ResolutionConsent_actor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([resolutionId, side])
+}
+
+model ResolutionApproval {
+  id           String            @id @default(uuid()) @db.Uuid
+  resolutionId String            @db.Uuid
+  actorId      String            @db.Uuid
+  sessionId    String            @db.Uuid
+  grantId      String            @unique @db.Uuid
+  createdAt    DateTime          @default(now())
+  resolution   ResolutionVersion @relation("ResolutionApproval_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  actor        User              @relation("ResolutionApproval_actor", fields: [actorId], references: [id], onDelete: Restrict)
+  session      OperatorSession   @relation("ResolutionApproval_session", fields: [sessionId], references: [id], onDelete: Restrict)
+  grant        ActionGrant       @relation("ResolutionApproval_grant", fields: [grantId], references: [id], onDelete: Restrict)
+
+  @@unique([resolutionId, actorId])
+}
+
+model ResolutionExecution {
+  id                      String                       @id @default(uuid()) @db.Uuid
+  resolutionId            String                       @db.Uuid
+  executionStep           String
+  action                  String
+  originalPaymentIntentId String?                      @unique @db.Uuid
+  actorId                 String?                      @db.Uuid
+  createdAt               DateTime                     @default(now())
+  resolution              ResolutionVersion            @relation("ResolutionExecution_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  originalPayment         PaymentIntent?               @relation("ResolutionExecution_originalPayment", fields: [originalPaymentIntentId], references: [id], onDelete: Restrict)
+  actor                   User?                        @relation("ResolutionExecution_actor", fields: [actorId], references: [id], onDelete: Restrict)
+  progress                ResolutionExecutionProgress? @relation("ResolutionExecutionProgress_execution")
+
+  @@unique([resolutionId, executionStep])
+}
+
+model ResolutionExecutionProgress {
+  executionId String              @id @db.Uuid
+  status      OutboxStatus        @default(PENDING)
+  result      Json?
+  completedAt DateTime?
+  updatedAt   DateTime            @updatedAt
+  execution   ResolutionExecution @relation("ResolutionExecutionProgress_execution", fields: [executionId], references: [id], onDelete: Restrict)
+}
+
+model ReturnObligation {
+  id                   String              @id @default(uuid()) @db.Uuid
+  resolutionId         String              @db.Uuid
+  itemSnapshotId       String              @db.Uuid
+  holderSide           OrderSide
+  ownerSide            OrderSide
+  deliveryMode         DeliveryMode
+  registrationDeadline DateTime
+  createdAt            DateTime            @default(now())
+  resolution           ResolutionVersion   @relation("ReturnObligation_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  itemSnapshot         OrderItemSnapshot   @relation("ReturnObligation_itemSnapshot", fields: [itemSnapshotId], references: [id], onDelete: Restrict)
+  progress             ReturnProgress?     @relation("ReturnProgress_obligation")
+  shipmentItem         ReturnShipmentItem? @relation("ReturnShipmentItem_obligation")
+  events               ReturnEvent[]       @relation("ReturnEvent_obligation")
+
+  @@unique([resolutionId, itemSnapshotId])
+}
+
+model ReturnProgress {
+  obligationId    String           @id @db.Uuid
+  status          ReturnStatus     @default(PENDING)
+  receiptDeadline DateTime?
+  handedOverAt    DateTime?
+  confirmedAt     DateTime?
+  updatedAt       DateTime         @updatedAt
+  obligation      ReturnObligation @relation("ReturnProgress_obligation", fields: [obligationId], references: [id], onDelete: Restrict)
+}
+
+model ReturnAddress {
+  id         String         @id @default(uuid()) @db.Uuid
+  caseId     String         @db.Uuid
+  side       OrderSide
+  version    Int            @default(1)
+  keyVersion String
+  ciphertext Bytes
+  nonce      Bytes
+  tag        Bytes
+  frozenAt   DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  case       AfterSalesCase @relation("ReturnAddress_case", fields: [caseId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, side])
+}
+
+model ReturnShipment {
+  id             String               @id @default(uuid()) @db.Uuid
+  resolutionId   String               @db.Uuid
+  holderSide     OrderSide
+  ownerSide      OrderSide
+  carrier        String
+  trackingNumber String
+  businessNo     String               @unique
+  status         ShipmentStatus       @default(REGISTERED)
+  registeredAt   DateTime             @default(now())
+  collectedAt    DateTime?
+  deliveredAt    DateTime?
+  updatedAt      DateTime             @updatedAt
+  resolution     ResolutionVersion    @relation("ReturnShipment_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  items          ReturnShipmentItem[] @relation("ReturnShipmentItem_shipment")
+  events         ReturnEvent[]        @relation("ReturnEvent_shipment")
+
+  @@unique([carrier, trackingNumber])
+}
+
+model ReturnShipmentItem {
+  shipmentId   String           @db.Uuid
+  obligationId String           @unique @db.Uuid
+  shipment     ReturnShipment   @relation("ReturnShipmentItem_shipment", fields: [shipmentId], references: [id], onDelete: Restrict)
+  obligation   ReturnObligation @relation("ReturnShipmentItem_obligation", fields: [obligationId], references: [id], onDelete: Restrict)
+
+  @@id([shipmentId, obligationId])
+}
+
+model ReturnEvent {
+  id              String            @id @default(uuid()) @db.Uuid
+  obligationId    String?           @db.Uuid
+  shipmentId      String?           @db.Uuid
+  actorId         String?           @db.Uuid
+  provider        String?
+  providerEventId String?
+  kind            String
+  details         Json?
+  occurredAt      DateTime
+  createdAt       DateTime          @default(now())
+  obligation      ReturnObligation? @relation("ReturnEvent_obligation", fields: [obligationId], references: [id], onDelete: Restrict)
+  shipment        ReturnShipment?   @relation("ReturnEvent_shipment", fields: [shipmentId], references: [id], onDelete: Restrict)
+  actor           User?             @relation("ReturnEvent_actor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerEventId])
+  @@index([obligationId, occurredAt])
+}
+
+model CompensationObligation {
+  // PostgreSQL partial unique index additionally allows one net obligation per resolution.
+  id                      String                @id @default(uuid()) @db.Uuid
+  resolutionId            String                @db.Uuid
+  rootDisputeId           String                @db.Uuid
+  executionStep           String
+  originalPaymentIntentId String?               @unique @db.Uuid
+  payerSide               OrderSide
+  payeeSide               OrderSide
+  amountFen               Int
+  currency                String                @default("CNY")
+  paymentDeadline         DateTime
+  createdAt               DateTime              @default(now())
+  resolution              ResolutionVersion     @relation("CompensationObligation_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  originalPayment         PaymentIntent?        @relation("CompensationObligation_originalPayment", fields: [originalPaymentIntentId], references: [id], onDelete: Restrict)
+  progress                CompensationProgress? @relation("CompensationProgress_obligation")
+  payment                 CompensationPayment?  @relation("CompensationPayment_obligation")
+
+  @@unique([resolutionId, executionStep])
+  @@unique([rootDisputeId, originalPaymentIntentId])
+}
+
+model CompensationProgress {
+  obligationId String                 @id @db.Uuid
+  status       CompensationStatus     @default(PENDING)
+  authorizedAt DateTime?
+  completedAt  DateTime?
+  updatedAt    DateTime               @updatedAt
+  obligation   CompensationObligation @relation("CompensationProgress_obligation", fields: [obligationId], references: [id], onDelete: Restrict)
+}
+
+model CompensationPayment {
+  id             String                       @id @default(uuid()) @db.Uuid
+  obligationId   String                       @unique @db.Uuid
+  businessNo     String                       @unique
+  provider       String
+  amountFen      Int
+  currency       String                       @default("CNY")
+  status         PaymentStatus                @default(CREATED)
+  checkoutParams Json?
+  paidAt         DateTime?
+  closedAt       DateTime?
+  refundedAt     DateTime?
+  transferredAt  DateTime?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  obligation     CompensationObligation       @relation("CompensationPayment_obligation", fields: [obligationId], references: [id], onDelete: Restrict)
+  entries        CompensationFinancialEntry[] @relation("CompensationFinancialEntry_payment")
+}
+
+model CompensationFinancialEntry {
+  id                    String                         @id @default(uuid()) @db.Uuid
+  paymentId             String                         @db.Uuid
+  integrationEventId    String?                        @db.Uuid
+  entryType             CompensationFinancialEntryType
+  provider              String
+  externalTransactionId String
+  businessNo            String                         @unique
+  amountFen             Int
+  currency              String                         @default("CNY")
+  occurredAt            DateTime
+  createdAt             DateTime                       @default(now())
+  payment               CompensationPayment            @relation("CompensationFinancialEntry_payment", fields: [paymentId], references: [id], onDelete: Restrict)
+  integrationEvent      IntegrationEvent?              @relation("CompensationFinancialEntry_integrationEvent", fields: [integrationEventId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentId, entryType])
+  @@unique([provider, externalTransactionId, entryType])
+}
+
+model RiskReport {
+  id          String           @id @default(uuid()) @db.Uuid
+  reporterId  String           @db.Uuid
+  targetType  RiskTargetType
+  targetId    String           @db.Uuid
+  reason      RiskReason
+  description String
+  status      RiskReportStatus @default(OPEN)
+  version     Int              @default(1)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  reporter    User             @relation("RiskReport_reporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  evidence    CaseEvidence[]   @relation("CaseEvidence_report")
+  records     RiskRecord[]     @relation("RiskRecord_report")
+  tasks       RiskTask[]       @relation("RiskTask_report")
+
+  @@index([reporterId, createdAt, id])
+  @@index([status, createdAt, id])
+}
+
+model RiskRecord {
+  id         String      @id @default(uuid()) @db.Uuid
+  reportId   String?     @db.Uuid
+  actorId    String      @db.Uuid
+  targetType String
+  targetId   String      @db.Uuid
+  action     String
+  reason     String
+  details    Json?
+  createdAt  DateTime    @default(now())
+  report     RiskReport? @relation("RiskRecord_report", fields: [reportId], references: [id], onDelete: Restrict)
+  actor      User        @relation("RiskRecord_actor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([reportId, createdAt, id])
+}
+
+model TradingRestriction {
+  userId     String                   @id @db.Uuid
+  status     TradingRestrictionStatus @default(CLEAR)
+  version    Int                      @default(1)
+  reason     String?
+  actorId    String?                  @db.Uuid
+  frozenAt   DateTime?
+  releasedAt DateTime?
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+  user       User                     @relation("TradingRestriction_user", fields: [userId], references: [id], onDelete: Restrict)
+  actor      User?                    @relation("TradingRestriction_actor", fields: [actorId], references: [id], onDelete: Restrict)
+}
+
+model RiskTask {
+  id          String          @id @default(uuid()) @db.Uuid
+  orderId     String?         @db.Uuid
+  caseId      String?         @db.Uuid
+  reportId    String?         @db.Uuid
+  sourceKey   String          @unique
+  kind        String
+  description String
+  status      RiskTaskStatus  @default(OPEN)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  order       Order?          @relation("RiskTask_order", fields: [orderId], references: [id], onDelete: Restrict)
+  case        AfterSalesCase? @relation("RiskTask_case", fields: [caseId], references: [id], onDelete: Restrict)
+  report      RiskReport?     @relation("RiskTask_report", fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt, id])
+}
+
+model OperatorDevice {
+  id               String               @id @default(uuid()) @db.Uuid
+  actorId          String               @db.Uuid
+  credentialDigest String               @unique
+  capability       OperatorCapability   @default(MOBILE_LIMITED)
+  status           OperatorDeviceStatus @default(PENDING)
+  approvedById     String?              @db.Uuid
+  approvedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  actor            User                 @relation("OperatorDevice_actor", fields: [actorId], references: [id], onDelete: Restrict)
+  approvedBy       User?                @relation("OperatorDevice_approvedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  sessions         OperatorSession[]    @relation("OperatorSession_device")
+  grants           ActionGrant[]        @relation("ActionGrant_device")
+}
+
+model OperatorSession {
+  id               String               @id @default(uuid()) @db.Uuid
+  actorId          String               @db.Uuid
+  deviceId         String               @db.Uuid
+  capability       OperatorCapability
+  credentialDigest String?              @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime             @default(now())
+  actor            User                 @relation("OperatorSession_actor", fields: [actorId], references: [id], onDelete: Restrict)
+  device           OperatorDevice       @relation("OperatorSession_device", fields: [deviceId], references: [id], onDelete: Restrict)
+  approvals        ResolutionApproval[] @relation("ResolutionApproval_session")
+  grants           ActionGrant[]        @relation("ActionGrant_session")
+
+  @@index([actorId, expiresAt])
+}
+
+model ActionGrant {
+  id              String              @id @default(uuid()) @db.Uuid
+  actorId         String              @db.Uuid
+  sessionId       String              @db.Uuid
+  deviceId        String              @db.Uuid
+  action          OperatorAction
+  resourceId      String              @db.Uuid
+  expectedVersion Int
+  requestDigest   String
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  createdAt       DateTime            @default(now())
+  actor           User                @relation("ActionGrant_actor", fields: [actorId], references: [id], onDelete: Restrict)
+  session         OperatorSession     @relation("ActionGrant_session", fields: [sessionId], references: [id], onDelete: Restrict)
+  device          OperatorDevice      @relation("ActionGrant_device", fields: [deviceId], references: [id], onDelete: Restrict)
+  approval        ResolutionApproval? @relation("ResolutionApproval_grant")
+
+  @@index([actorId, expiresAt])
+}
+
+model OrderHoldBlocker {
+  id         String          @id @default(uuid()) @db.Uuid
+  orderId    String          @db.Uuid
+  kind       HoldBlockerKind
+  sourceId   String
+  reason     String
+  resolvedAt DateTime?
+  createdAt  DateTime        @default(now())
+  order      Order           @relation("OrderHoldBlocker_order", fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, kind, sourceId])
+  @@index([orderId, resolvedAt])
+}
+
+model OrderDeadlineExtension {
+  id               String            @id @default(uuid()) @db.Uuid
+  orderId          String            @db.Uuid
+  resolutionId     String            @db.Uuid
+  actorId          String            @db.Uuid
+  kind             OrderDeadlineKind
+  originalDeadline DateTime?
+  newDeadline      DateTime
+  affectedSides    OrderSide[]
+  reason           String
+  approvedAt       DateTime          @default(now())
+  createdAt        DateTime          @default(now())
+  order            Order             @relation("OrderDeadlineExtension_order", fields: [orderId], references: [id], onDelete: Restrict)
+  resolution       ResolutionVersion @relation("OrderDeadlineExtension_resolution", fields: [resolutionId], references: [id], onDelete: Restrict)
+  actor            User              @relation("OrderDeadlineExtension_actor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, kind])
 }

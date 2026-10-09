@@ -13,10 +13,10 @@
     "predb:seed": "npm run db:generate",
     "db:seed": "prisma db seed",
     "dev": "tsx watch src/main.ts",
-    "lint": "eslint src test prisma prisma.config.ts vitest.config.ts vitest.phase3.config.ts",
+    "lint": "eslint src test prisma prisma.config.ts vitest.config.ts vitest.phase3.config.ts vitest.phase4.config.ts",
     "pretest": "npm run build --workspace @barter/contracts",
     "start": "node dist/src/main.js",
-    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.phase3.config.ts",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.phase3.config.ts && vitest run --config vitest.phase4.config.ts",
     "pretypecheck": "npm run build --workspace @barter/contracts",
     "typecheck": "prisma generate && tsc --noEmit"
   },

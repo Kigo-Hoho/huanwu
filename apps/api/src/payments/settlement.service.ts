@@ -48,7 +48,7 @@ export class SettlementService {
     if (ids.length < 2 || ids.length > 6 || items.length !== ids.length || leases.length !== ids.length || items.some(item => item.status !== 'ACTIVE' || item.ownerId !== order!.items.find(snapshot => snapshot.itemId === item.id)?.ownerId || item.reservation?.orderId !== orderId)) return false;
     await tx.item.updateMany({ where: { id: { in: ids } }, data: { status: 'INACTIVE', version: { increment: 1 } } });
     await this.reservations.releaseOrder(tx, orderId);
-    await tx.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', version: { increment: 1 } } });
+    await tx.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: now, version: { increment: 1 } } });
     await this.audit.record(tx, { actorId: null, action: 'ORDER_COMPLETED', entityType: 'Order', entityId: orderId, before: { status: 'SETTLING' }, after: { status: 'COMPLETED', completedAt: now.toISOString(), itemIds: ids } });
     return true;
   }

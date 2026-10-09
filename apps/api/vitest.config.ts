@@ -24,7 +24,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['test/**/*.e2e-spec.ts'],
-          exclude: ['test/phase3/**'],
+          exclude: ['test/phase3/**', 'test/phase4/**'],
           globalSetup: ['test/phase3/support/legacy-database-global-setup.ts'],
           setupFiles: ['test/phase3/support/legacy-database-setup.ts'],
         },

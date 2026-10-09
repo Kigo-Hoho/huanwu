@@ -100,3 +100,18 @@ export async function createPhase3Database(): Promise<{ url: string; close(): Pr
     },
   };
 }
+
+// The Phase4 runner reuses this namespace validation and ordinary DROP lifecycle.
+export async function createPhase4Database(): Promise<{ url: string; close(): Promise<void> }> {
+  const { PHASE4_NAMESPACE: namespace, PHASE4_TEMPLATE: template, DATABASE_URL: baseUrl } = process.env;
+  if (!namespace || !template || !baseUrl) throw new Error('Phase4 global database setup is required');
+  const database = await createOwnedDatabase(baseUrl, namespace, template);
+  process.env.DATABASE_URL = database.url;
+  return {
+    url: database.url,
+    async close() {
+      try { await database.close(); }
+      finally { process.env.DATABASE_URL = baseUrl; }
+    },
+  };
+}
