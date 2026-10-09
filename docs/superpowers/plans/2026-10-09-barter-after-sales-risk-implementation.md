@@ -81,6 +81,8 @@ it('pins the inclusive net compensation ceiling', () => {
 
 执行裁定（2026-10-09）：尚未发布的签发 DTO 统一为严格 `expectedVersions/requestHash`，不增加旧单版本输入兼容；消费端按服务端规范化业务输入计算摘要。新增独立 POST `/api/admin/security/login` 及共享登录输入/结果承载绑定设备的 sid 会话，保留原无 sid 低风险登录行为；新增路由不接受客户端自行声明桌面能力。原因是 Task1 的单版本 DTO 不能表达本任务要求的完整动作绑定，既有 auth 返回又须保持兼容。
 
+会话列表/撤销仅覆盖当前运营者自己的会话；不扩展跨账号单会话管理。受信 SUPER_ADMIN 撤销设备后，其绑定会话及授权立即失效。设备/会话修改使用持久化版本和 CAS，同事务递增、审计及幂等；不能以永远为1的版本代替检查。当前 sid 被撤销后，重试也必须先拒绝认证，不能因旧幂等结果绕过；可用同账号另一有效会话验证无重复撤销。
+
 - [ ] **Step 1: 写失败测试。** `expect(await h.mobileGrant('APPROVE_FUNDS')).toMatchObject({status:403})`；伪造 User-Agent/deviceKind 不提升权限；密码重验后 grant 5 分钟过期，换资源/内容/账号拒绝；设备/角色撤销即时失效；审计失败不消费 grant；15/30 分钟边界测试。
 - [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/operator-security.e2e-spec.ts`，确认新安全入口/授权行为尚缺失。
 - [ ] **Step 3: 实现服务。** 设备登记生成随机绑定凭据，只存摘要，HttpOnly cookie（生产 Secure、受限 SameSite）；敏感会话必须携带有效 sid 和绑定 cookie，不接受客户端任意 deviceId。配置明确允许的运营 origin，跨域凭证/CORS/CSRF 校验不使用通配；开发本地例外仅非生产。移动默认权限、运维 CLI 首次批准、受信超级管理员非自批后续批准/撤销。旧无 sid token 只保留既有低风险查询/审核，不能获得第四阶段敏感权限。grant 绑定业务输入摘要（不含 grant 本身与密码），消费在业务事务内，成功幂等重试仍检查当前权限。CLI 执行只针对自有测试库，不对保留库自动批准。
