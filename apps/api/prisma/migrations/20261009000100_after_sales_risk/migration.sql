@@ -874,6 +874,9 @@ BEGIN
 END;
 $$;
 CREATE TRIGGER "CompensationFinancialEntry_conservation" BEFORE INSERT ON "CompensationFinancialEntry" FOR EACH ROW EXECUTE FUNCTION check_compensation_financial_entry();
+-- Unique-index conflict detection is independent of an INSERT transaction's
+-- MVCC snapshot; the trigger's EXISTS alone is unsafe under REPEATABLE READ.
+CREATE UNIQUE INDEX "CompensationFinancialEntry_one_terminal" ON "CompensationFinancialEntry" ("paymentId") WHERE "entryType" IN ('TRANSFER','REFUND');
 
 -- Trust only explicit UTC completion times in the existing immutable completion
 -- audit. Conflicting timestamps, malformed dates and absent evidence remain NULL.
@@ -906,20 +909,22 @@ DECLARE
 BEGIN
   SELECT o.id,o."differenceFen" INTO STRICT order_id,original_difference
     FROM "Order" o JOIN "AfterSalesCase" a ON a."orderId"=o.id WHERE a.id=NEW."caseId";
-  IF NOT c ?& ARRAY['originalDifferenceReversal','initiatorExtraFen','recipientExtraFen','initiatorShippingFen','recipientShippingFen']
+  IF jsonb_typeof(c) IS DISTINCT FROM 'object'
+    OR NOT c ?& ARRAY['originalDifferenceReversal','initiatorExtraFen','recipientExtraFen','initiatorShippingFen','recipientShippingFen']
     OR c-ARRAY['originalDifferenceReversal','initiatorExtraFen','recipientExtraFen','initiatorShippingFen','recipientShippingFen']<>'{}'::jsonb THEN
     RAISE EXCEPTION 'Invalid compensation components' USING ERRCODE='23514';
   END IF;
   FOREACH component IN ARRAY ARRAY['initiatorExtraFen','recipientExtraFen','initiatorShippingFen','recipientShippingFen'] LOOP
-    IF jsonb_typeof(c->component)<>'number' OR c->>component !~ '^[0-9]+$' OR (c->>component)::numeric>20000 THEN
+    IF jsonb_typeof(c->component) IS DISTINCT FROM 'number' OR c->>component !~ '^[0-9]+$' OR (c->>component)::numeric>20000 THEN
       RAISE EXCEPTION 'Compensation component bounds exceeded' USING ERRCODE='23514';
     END IF;
   END LOOP;
   reversal:=c->'originalDifferenceReversal';
-  IF jsonb_typeof(reversal)<>'object' OR NOT reversal ?& ARRAY['amountFen','payer']
+  IF jsonb_typeof(reversal) IS DISTINCT FROM 'object' OR NOT reversal ?& ARRAY['amountFen','payer']
     OR reversal-ARRAY['amountFen','payer']<>'{}'::jsonb
-    OR jsonb_typeof(reversal->'amountFen')<>'number' OR reversal->>'amountFen' !~ '^[0-9]+$'
+    OR jsonb_typeof(reversal->'amountFen') IS DISTINCT FROM 'number' OR reversal->>'amountFen' !~ '^[0-9]+$'
     OR (reversal->>'amountFen')::numeric>original_difference
+    OR jsonb_typeof(reversal->'payer') IS DISTINCT FROM 'string'
     OR reversal->>'payer' NOT IN ('NONE','INITIATOR','RECIPIENT') THEN
     RAISE EXCEPTION 'Original difference reversal component bounds exceeded' USING ERRCODE='23514';
   END IF;
@@ -932,8 +937,10 @@ BEGIN
     RAISE EXCEPTION 'Net compensation does not match its components' USING ERRCODE='23514';
   END IF;
   FOR plan IN SELECT value FROM jsonb_array_elements(NEW."originalFunds") LOOP
-    IF jsonb_typeof(plan)<>'object' OR NOT plan ?& ARRAY['paymentIntentId','destination']
+    IF jsonb_typeof(plan) IS DISTINCT FROM 'object' OR NOT plan ?& ARRAY['paymentIntentId','destination']
       OR plan-ARRAY['paymentIntentId','destination']<>'{}'::jsonb
+      OR jsonb_typeof(plan->'destination') IS DISTINCT FROM 'string'
+      OR jsonb_typeof(plan->'paymentIntentId') IS DISTINCT FROM 'string'
       OR plan->>'destination' NOT IN ('RETAIN_FOR_EXCHANGE','REFUND_PAYER','SETTLE_BENEFICIARY')
       OR NOT pg_input_is_valid(plan->>'paymentIntentId','uuid') THEN
       RAISE EXCEPTION 'Invalid original funds destination' USING ERRCODE='23514';
@@ -954,7 +961,7 @@ CREATE TRIGGER "ResolutionVersion_funds_plan" BEFORE INSERT ON "ResolutionVersio
 -- execution-step name cannot manufacture a second collection for that plan.
 CREATE UNIQUE INDEX "CompensationObligation_one_net" ON "CompensationObligation" ("resolutionId") WHERE "amountFen">0;
 CREATE FUNCTION validate_compensation_obligation_source() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE resolution "ResolutionVersion"; dispute uuid;
+DECLARE resolution "ResolutionVersion"; dispute uuid; original_order "Order"; intent "PaymentIntent"; reversal jsonb;
 BEGIN
   IF NEW."amountFen" NOT BETWEEN 1 AND 60000 OR NEW.currency<>'CNY' OR NEW."payerSide"=NEW."payeeSide" THEN
     RAISE EXCEPTION 'Compensation obligation violates amount check constraint' USING ERRCODE='23514';
@@ -963,6 +970,33 @@ BEGIN
   SELECT "rootDisputeId" INTO STRICT dispute FROM "AfterSalesCase" WHERE id=resolution."caseId";
   IF NEW."amountFen"<>resolution."netCompensationFen" OR NEW."payerSide"::text<>resolution."compensationPayer"::text OR NEW."rootDisputeId"<>dispute THEN
     RAISE EXCEPTION 'Compensation obligation must match its resolution amount, payer and dispute' USING ERRCODE='23514';
+  END IF;
+  reversal:=resolution."compensationComponents"->'originalDifferenceReversal';
+  IF (reversal->>'amountFen')::integer>0 THEN
+    IF NEW."originalPaymentIntentId" IS NULL THEN
+      RAISE EXCEPTION 'Positive reversal requires an original settled difference payment' USING ERRCODE='23514';
+    END IF;
+    SELECT o.* INTO STRICT original_order FROM "Order" o JOIN "AfterSalesCase" a ON a."orderId"=o.id WHERE a.id=resolution."caseId";
+    SELECT * INTO intent FROM "PaymentIntent" WHERE id=NEW."originalPaymentIntentId";
+    IF intent.id IS NULL OR intent."orderId"<>original_order.id OR intent.purpose<>'DIFFERENCE'
+      OR intent.side::text<>original_order.payer::text OR intent."amountFen"<>original_order."differenceFen"
+      OR intent.currency<>'CNY' OR intent.status<>'PAID' OR intent."paidAt" IS NULL
+      OR intent."closedAt" IS NOT NULL OR intent."refundedAt" IS NOT NULL THEN
+      RAISE EXCEPTION 'Invalid original settled difference payment source' USING ERRCODE='23514';
+    END IF;
+    -- A mutable PAID status alone cannot establish collection or settlement.
+    -- Match the immutable financial facts exactly as normal settlement does.
+    IF NOT EXISTS (SELECT 1 FROM "FinancialEntry" e WHERE e."intentId"=intent.id AND e."entryType"='PAYMENT'
+        AND e."amountFen"=intent."amountFen" AND e.currency=intent.currency AND e.provider=intent.provider AND e."businessNo"=intent."businessNo")
+      OR NOT EXISTS (SELECT 1 FROM "FinancialEntry" e WHERE e."intentId"=intent.id AND e."entryType"='DIFFERENCE_SETTLEMENT'
+        AND e."amountFen"=intent."amountFen" AND e.currency=intent.currency AND e.provider=intent.provider AND e."businessNo"='settle:'||intent.id::text) THEN
+      RAISE EXCEPTION 'Original difference payment lacks confirmed collection or settlement' USING ERRCODE='23514';
+    END IF;
+    -- The reversal component returns money from the original beneficiary to
+    -- the original payer. Offsetting extras may give the net another payer.
+    IF reversal->>'payer'<>(CASE WHEN intent.side='INITIATOR' THEN 'RECIPIENT' ELSE 'INITIATOR' END) THEN
+      RAISE EXCEPTION 'Original difference reversal direction must return to its original payer' USING ERRCODE='23514';
+    END IF;
   END IF;
   RETURN NEW;
 END;

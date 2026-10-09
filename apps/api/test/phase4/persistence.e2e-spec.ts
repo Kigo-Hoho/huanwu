@@ -28,7 +28,7 @@ it('allows at most one open case and permits a successor after closure', async (
   await next();
 });
 it('rejects rewrites and deletes of resolution, consent, approval, records and private evidence', async () => {
-  await client.query('INSERT INTO "ResolutionVersion" (id,"caseId",number,"authorId",type,reason,"rulesVersion","itemSnapshotIds",responsibility,"originalFunds","returnPlan","compensationComponents","netCompensationFen","compensationPayer","orderOutcome") VALUES ($1,$2,1,$3,\'FUNDS_ONLY\',\'核验原款\',\'phase4-simulation-v1\',$4,\'INITIATOR\',\'[]\',\'[]\',\'{"originalDifferenceReversal":{"amountFen":20000,"payer":"INITIATOR"},"initiatorExtraFen":20000,"recipientExtraFen":0,"initiatorShippingFen":20000,"recipientShippingFen":0}\',60000,\'INITIATOR\',\'PRESERVE_TERMINAL\')', [resolutionId, caseId, h.actors.operations.id, (await h.prisma.orderItemSnapshot.findMany({ where: { orderId } })).map(i => i.id)]);
+  await client.query('INSERT INTO "ResolutionVersion" (id,"caseId",number,"authorId",type,reason,"rulesVersion","itemSnapshotIds",responsibility,"originalFunds","returnPlan","compensationComponents","netCompensationFen","compensationPayer","orderOutcome") VALUES ($1,$2,1,$3,\'FUNDS_ONLY\',\'核验原款\',\'phase4-simulation-v1\',$4,\'INITIATOR\',\'[]\',\'[]\',\'{"originalDifferenceReversal":{"amountFen":0,"payer":"NONE"},"initiatorExtraFen":20000,"recipientExtraFen":0,"initiatorShippingFen":20000,"recipientShippingFen":0}\',40000,\'INITIATOR\',\'PRESERVE_TERMINAL\')', [resolutionId, caseId, h.actors.operations.id, (await h.prisma.orderItemSnapshot.findMany({ where: { orderId } })).map(i => i.id)]);
   await client.query('INSERT INTO "ResolutionConsent" (id,"resolutionId","actorId",side,decision) VALUES ($1,$2,$3,\'INITIATOR\',\'AGREE\')', [randomUUID(), resolutionId, h.actors.initiator.id]);
   await client.query('INSERT INTO "ResolutionApproval" (id,"resolutionId","actorId","sessionId","grantId") VALUES ($1,$2,$3,$4,$5)', [randomUUID(), resolutionId, h.actors.superAdminOne.id, ...await securityReferences()]);
   await client.query('INSERT INTO "CaseRecord" (id,"caseId","actorId",kind,description) VALUES ($1,$2,$3,\'NOTE\',\'补充处理记录\')', [randomUUID(), caseId, h.actors.operations.id]);
@@ -55,13 +55,13 @@ it('bounds compensation obligations, origins and mutually exclusive terminal dis
   const obligation = randomUUID(); const payment = randomUUID();
   const insert = (amount: number, step: string, payer = 'INITIATOR', payee = 'RECIPIENT') => client.query('INSERT INTO "CompensationObligation" (id,"resolutionId","rootDisputeId","executionStep","payerSide","payeeSide","amountFen","paymentDeadline") VALUES ($1,$2,$3,$4,$5,$6,$7,now()+interval \'72 hours\')', [randomUUID(), resolutionId, rootDisputeId, step, payer, payee, amount]);
   for (const amount of [0, -1, 60001]) await expect(insert(amount, `invalid-${amount}`)).rejects.toThrow(/check constraint/i);
-  await expect(insert(59999, 'wrong-source-amount')).rejects.toThrow(/resolution amount/i);
+  await expect(insert(39999, 'wrong-source-amount')).rejects.toThrow(/resolution amount/i);
   await expect(insert(100, 'invalid-direction', 'INITIATOR', 'INITIATOR')).rejects.toThrow(/check constraint/i);
-  await client.query('INSERT INTO "CompensationObligation" (id,"resolutionId","rootDisputeId","executionStep","payerSide","payeeSide","amountFen","paymentDeadline") VALUES ($1,$2,$3,\'net\',\'INITIATOR\',\'RECIPIENT\',60000,now()+interval \'72 hours\')', [obligation, resolutionId, rootDisputeId]);
-  await expect(insert(60000, 'net')).rejects.toThrow(/unique constraint/i);
-  await expect(insert(60000, 'second-net-step')).rejects.toThrow(/CompensationObligation_one_net/);
-  await client.query('INSERT INTO "CompensationPayment" (id,"obligationId","businessNo",provider,"amountFen","updatedAt") VALUES ($1,$2,$3,\'simulated\',60000,now())', [payment, obligation, `compensation:${payment}`]);
-  const entry = (type: string, amount = 60000) => client.query('INSERT INTO "CompensationFinancialEntry" (id,"paymentId","entryType",provider,"externalTransactionId","businessNo","amountFen","occurredAt") VALUES ($1,$2,$3,\'simulated\',$4,$5,$6,now())', [randomUUID(), payment, type, randomUUID(), randomUUID(), amount]);
+  await client.query('INSERT INTO "CompensationObligation" (id,"resolutionId","rootDisputeId","executionStep","payerSide","payeeSide","amountFen","paymentDeadline") VALUES ($1,$2,$3,\'net\',\'INITIATOR\',\'RECIPIENT\',40000,now()+interval \'72 hours\')', [obligation, resolutionId, rootDisputeId]);
+  await expect(insert(40000, 'net')).rejects.toThrow(/unique constraint/i);
+  await expect(insert(40000, 'second-net-step')).rejects.toThrow(/CompensationObligation_one_net/);
+  await client.query('INSERT INTO "CompensationPayment" (id,"obligationId","businessNo",provider,"amountFen","updatedAt") VALUES ($1,$2,$3,\'simulated\',40000,now())', [payment, obligation, `compensation:${payment}`]);
+  const entry = (type: string, amount = 40000) => client.query('INSERT INTO "CompensationFinancialEntry" (id,"paymentId","entryType",provider,"externalTransactionId","businessNo","amountFen","occurredAt") VALUES ($1,$2,$3,\'simulated\',$4,$5,$6,now())', [randomUUID(), payment, type, randomUUID(), randomUUID(), amount]);
   await expect(entry('TRANSFER')).rejects.toThrow(/confirmed collection/i);
   await entry('COLLECTION');
   await expect(entry('TRANSFER', 60001)).rejects.toThrow(/amount|conservation/i);
