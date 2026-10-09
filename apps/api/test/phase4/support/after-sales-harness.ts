@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import argon2 from 'argon2';
+import request from 'supertest';
 import type { AuthenticatedUser } from '../../../src/auth/auth.service.js';
 import { createOrderHarness } from '../../phase3/support/order-harness.js';
 
@@ -23,8 +24,22 @@ export async function createAfterSalesHarness() {
       additional[name] = { id: user.id, roles };
     }
     const owned = base;
+    const origin = 'http://localhost:5173';
+    async function operatorLogin(actor = additional.superAdminOne, cookie?: string) {
+      const credential = await owned.prisma.adminCredential.findUniqueOrThrow({ where: { userId: actor.id } });
+      const call = request(owned.app.getHttpServer()).post('/api/admin/security/login').set('Origin', origin);
+      if (cookie) call.set('Cookie', cookie);
+      const response = await call.send({ email: credential.email, password });
+      return { response, token: response.body.accessToken as string, cookie: (response.headers['set-cookie'] as unknown as string[] | undefined)?.map(value => value.split(';')[0]).join('; ') ?? '' };
+    }
+    function securityCommand(session: Awaited<ReturnType<typeof operatorLogin>>, path: string, input: object) {
+      return request(owned.app.getHttpServer()).post(`/api/admin/security/${path}`).set('Authorization', `Bearer ${session.token}`).set('Cookie', session.cookie).set('Origin', origin).set('Idempotency-Key', randomUUID()).send(input);
+    }
     return {
       ...owned, actors: { ...owned.actors, ...additional }, operatorPassword: password,
+      operatorLogin, securityCommand,
+      enrollOwnedDevice: (session: Awaited<ReturnType<typeof operatorLogin>>) => securityCommand(session, 'devices', {}),
+      grant: (session: Awaited<ReturnType<typeof operatorLogin>>, input: object) => securityCommand(session, 'grants', { password, ...input }),
       async prepareOrder(options: Parameters<typeof owned.confirmedProposal>[0] = {}) {
         const proposal = await owned.confirmedProposal(options);
         return (await owned.convert(proposal).expect(201)).body.order as { id: string; version: number };

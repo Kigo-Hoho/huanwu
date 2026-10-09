@@ -7,10 +7,16 @@ export const OperatorActionSchema = z.enum(['FREEZE_TRADING', 'UNFREEZE_TRADING'
 // This DTO carries references only. Actor, device and capability are rehydrated
 // by the API and cannot be supplied through a business command.
 export const OperatorActionContextSchema = z.strictObject({ sessionId: uuid, grantId: uuid });
-export const ActionGrantRequestSchema = z.strictObject({ action: OperatorActionSchema, resourceId: uuid, expectedVersion: z.number().int().positive(), requestDigest: z.string().regex(/^[a-f0-9]{64}$/), password: z.string().min(1).max(500) });
-export const OperatorDeviceViewSchema = z.strictObject({ id: uuid, capability: OperatorCapabilitySchema, status: OperatorDeviceStatusSchema, createdAt: time, approvedAt: time.nullable(), revokedAt: time.nullable() });
-export const OperatorSessionViewSchema = z.strictObject({ id: uuid, deviceId: uuid, capability: OperatorCapabilitySchema, expiresAt: time });
-export const ActionGrantViewSchema = z.strictObject({ id: uuid, action: OperatorActionSchema, resourceId: uuid, expectedVersion: z.number().int().positive(), expiresAt: time });
+export const OperatorExpectedVersionsSchema = z.record(z.string().regex(/^(expected[A-Za-z]*Version|resolutionVersion)$/), z.number().int().positive()).refine(value => Object.keys(value).length > 0 && Object.keys(value).length <= 10);
+export const ActionGrantRequestSchema = z.strictObject({ action: OperatorActionSchema, resourceId: uuid, expectedVersions: OperatorExpectedVersionsSchema, requestHash: z.string().regex(/^[a-f0-9]{64}$/), password: z.string().min(1).max(500) });
+export const OperatorDeviceViewSchema = z.strictObject({ id: uuid, version: z.number().int().positive(), capability: OperatorCapabilitySchema, status: OperatorDeviceStatusSchema, createdAt: time, approvedAt: time.nullable(), revokedAt: time.nullable() });
+export const OperatorDeviceCommandSchema = z.strictObject({ expectedVersion: z.number().int().positive(), reason: z.string().trim().min(1).max(2000), operatorAction: OperatorActionContextSchema });
+export const OperatorDeviceEnrollmentSchema = z.strictObject({});
+export const OperatorSessionRevokeSchema = z.strictObject({ expectedVersion: z.number().int().positive(), reason: z.string().trim().min(1).max(2000) });
+export const OperatorSessionViewSchema = z.strictObject({ id: uuid, version: z.number().int().positive(), deviceId: uuid, capability: OperatorCapabilitySchema, expiresAt: time });
+export const ActionGrantViewSchema = z.strictObject({ id: uuid, action: OperatorActionSchema, resourceId: uuid, expectedVersions: OperatorExpectedVersionsSchema, expiresAt: time });
+export const OperatorLoginRequestSchema = z.strictObject({ email: z.email().trim().toLowerCase(), password: z.string().min(1).max(500) });
+export const OperatorLoginResultSchema = z.strictObject({ accessToken: z.string().min(1), expiresIn: z.number().int().positive(), user: z.strictObject({ id: uuid, roles: z.array(z.enum(['OPERATIONS', 'REVIEWER', 'SUPER_ADMIN'])).min(1) }), operatorSession: OperatorSessionViewSchema });
 export type OperatorCapability = z.infer<typeof OperatorCapabilitySchema>;
 export type OperatorDeviceStatus = z.infer<typeof OperatorDeviceStatusSchema>;
 export type OperatorAction = z.infer<typeof OperatorActionSchema>;
@@ -19,3 +25,7 @@ export type ActionGrantRequest = z.infer<typeof ActionGrantRequestSchema>;
 export type OperatorDeviceView = z.infer<typeof OperatorDeviceViewSchema>;
 export type OperatorSessionView = z.infer<typeof OperatorSessionViewSchema>;
 export type ActionGrantView = z.infer<typeof ActionGrantViewSchema>;
+export type OperatorLoginRequest = z.infer<typeof OperatorLoginRequestSchema>;
+export type OperatorLoginResult = z.infer<typeof OperatorLoginResultSchema>;
+export type OperatorDeviceCommand = z.infer<typeof OperatorDeviceCommandSchema>;
+export type OperatorSessionRevoke = z.infer<typeof OperatorSessionRevokeSchema>;

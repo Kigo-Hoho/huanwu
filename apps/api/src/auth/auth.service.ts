@@ -29,6 +29,7 @@ export interface AuthenticatedUser {
 
 export interface AuthenticatedPrincipal extends AuthenticatedUser {
   type: 'CUSTOMER' | 'OPERATOR';
+  sessionId?: string;
 }
 
 interface AccessTokenClaims {
@@ -37,6 +38,7 @@ interface AccessTokenClaims {
   type: AuthenticatedPrincipal['type'];
   iat: number;
   exp: number;
+  sid?: string;
 }
 
 export interface AuthSession {
@@ -165,7 +167,7 @@ export class AuthService {
       throw new UnauthorizedException('Access token has expired');
     }
 
-    return { id: payload.sub, roles: payload.roles, type: payload.type };
+    return { id: payload.sub, roles: payload.roles, type: payload.type, ...(payload.sid ? { sessionId: payload.sid } : {}) };
   }
 
   async rehydrateAuthenticatedUser(
@@ -209,9 +211,15 @@ export class AuthService {
     };
   }
 
+  createOperatorSession(user: AuthenticatedUser, sessionId: string, ttl: number): AuthSession {
+    return this.createSession(user, 'OPERATOR', sessionId, ttl);
+  }
+
   private createSession(
     user: AuthenticatedUser,
     type: AccessTokenClaims['type'],
+    sessionId?: string,
+    ttl = accessTokenTtlSeconds,
   ): AuthSession {
     const iat = Math.floor(Date.now() / 1000);
     const claims: AccessTokenClaims = {
@@ -219,7 +227,8 @@ export class AuthService {
       roles: user.roles,
       type,
       iat,
-      exp: iat + accessTokenTtlSeconds,
+      exp: iat + ttl,
+      ...(sessionId ? { sid: sessionId } : {}),
     };
     const header = encode({ alg: 'HS256', typ: 'JWT' });
     const payload = encode(claims);
@@ -227,7 +236,7 @@ export class AuthService {
 
     return {
       accessToken: `${unsignedToken}.${this.signature(unsignedToken)}`,
-      expiresIn: accessTokenTtlSeconds,
+      expiresIn: ttl,
       user,
     };
   }
@@ -255,6 +264,7 @@ export class AuthService {
       (claims.type !== 'CUSTOMER' && claims.type !== 'OPERATOR') ||
       typeof claims.iat !== 'number' ||
       typeof claims.exp !== 'number'
+      || (claims.sid !== undefined && (claims.type !== 'OPERATOR' || typeof claims.sid !== 'string' || !/^[a-f0-9-]{36}$/.test(claims.sid)))
     ) {
       return false;
     }

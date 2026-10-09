@@ -90,6 +90,7 @@ it('backfills only a trustworthy completedAt audit and leaves unsupported histor
       if (i === 4) await old.query('INSERT INTO "AuditLog" (id,action,"entityType","entityId",after) VALUES ($1,\'ORDER_COMPLETED\',\'Order\',$2,$3)', [randomUUID(), order, JSON.stringify({ status: 'COMPLETED', completedAt: '2026-10-04T00:00:00.000Z' })]);
     }
     const audits = (await old.query('SELECT * FROM "AuditLog" ORDER BY id')).rows;
+    const legacyMigrations = (await old.query('SELECT migration_name,checksum,finished_at FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY migration_name')).rows;
     await applyMigrations(database.url);
     // Existing Prisma DateTime columns store UTC without a zone; tell pg which
     // zone to use rather than allowing the Windows process timezone to infer it.
@@ -98,7 +99,9 @@ it('backfills only a trustworthy completedAt audit and leaves unsupported histor
     for (const id of orders.slice(1)) expect(result.find(r => r.id === id).completedAt).toBeNull();
     expect(result.every(r => r.status === 'COMPLETED' && r.updatedAt.toISOString() === '2030-01-01T00:00:00.000Z')).toBe(true);
     expect((await old.query('SELECT * FROM "AuditLog" ORDER BY id')).rows).toEqual(audits);
-    expect((await old.query('SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL')).rows).toHaveLength(4);
+    const migrations = (await old.query('SELECT migration_name,checksum,finished_at FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY migration_name')).rows;
+    expect(migrations.filter(row => legacyMigrations.some(previous => previous.migration_name === row.migration_name))).toEqual(legacyMigrations);
+    expect(migrations.map(row => row.migration_name)).toContain('20261009000100_after_sales_risk');
   } finally { try { await old.end(); } finally { await database.close(); } }
 });
 it('persists the normal settlement timestamp together with its completed audit', async () => {

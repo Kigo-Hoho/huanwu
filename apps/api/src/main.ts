@@ -5,15 +5,16 @@ import type { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module.js';
+import { operatorOrigins } from './operator-security/operator-session.service.js';
 
 export function configureApp(app: INestApplication): void {
   app.setGlobalPrefix('api');
   const allowedOrigins = process.env.CORS_ORIGINS?.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  if (allowedOrigins?.length) {
-    app.enableCors({ credentials: true, origin: allowedOrigins });
-  }
+  const origins = [...new Set([...(allowedOrigins ?? []), ...operatorOrigins()])];
+  for (const origin of origins) if (new URL(origin).origin !== origin) throw new Error('CORS requires exact origins');
+  if (origins.length) app.enableCors({ credentials: true, origin: origins });
 }
 
 async function bootstrap(): Promise<void> {

@@ -8,8 +8,8 @@ it('accepts only server-issued session and action grant references', () => {
   for (const change of [{ actorId: id }, { deviceKind: 'DESKTOP_PRIVILEGED' }, { password: 'private' }]) expect(schema('OperatorActionContextSchema').safeParse({ sessionId: id, grantId: id, ...change }).success).toBe(false);
 });
 it('binds reauthentication to action, resource, version and digest', () => {
-  const input = { action: 'APPROVE_FUNDS', resourceId: id, expectedVersion: 1, requestDigest: 'a'.repeat(64), password: 'test-only-password' };
+  const input = { action: 'APPROVE_FUNDS', resourceId: id, expectedVersions: { expectedCaseVersion: 1, expectedOrderVersion: 2, resolutionVersion: 3 }, requestHash: 'a'.repeat(64), password: 'test-only-password' };
   expect(schema('ActionGrantRequestSchema').safeParse(input).success).toBe(true);
-  expect(schema('ActionGrantRequestSchema').safeParse({ ...input, expectedVersion: 0 }).success).toBe(false);
-  expect(schema('ActionGrantRequestSchema').safeParse({ ...input, requestDigest: 'unchecked' }).success).toBe(false);
+  expect(schema('ActionGrantRequestSchema').safeParse({ ...input, expectedVersions: {} }).success).toBe(false);
+  expect(schema('ActionGrantRequestSchema').safeParse({ ...input, requestHash: 'unchecked' }).success).toBe(false);
 });
