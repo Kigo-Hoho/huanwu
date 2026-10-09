@@ -58,7 +58,7 @@
 
 **Interfaces:** Produces 各领域 `...Schema` 和 `z.infer` 类型，包括 CaseView/CaseListView/CaseCommandInput/CaseCommandResult、ResolutionInput、EvidenceView、ReturnView、CompensationView、RiskReportView、OperatorActionContext 的公开对应 DTO；内部 LockedCase 和 CaseMutationContext。测试 `createAfterSalesHarness(): Promise<AfterSalesHarness>` 提供 clock、prisma、app、actors（两用户、第三人、客服、风控、两个超级管理员、混合身份）、command/get、faultAuditOnce、close；订单准备复用现有第三阶段测试流程而非产品模块内部方法。
 
-- [ ] **Step 1: 写失败测试。** 契约断言 `expect(NetCompensationSchema.safeParse({amountFen: 60001, payer: 'INITIATOR'}).success).toBe(false)`，零补偿 payer=NONE，拒绝小数和多余字段；持久化测试断言同订单第二份开放工单唯一冲突、修改/删除方案/证据/资金事实失败。历史完成审计含 completedAt 时回填相同时间，无证据时保持 null。
+- [x] **Step 1: 写失败测试。** 契约断言 `expect(NetCompensationSchema.safeParse({amountFen: 60001, payer: 'INITIATOR'}).success).toBe(false)`，零补偿 payer=NONE，拒绝小数和多余字段；持久化测试断言同订单第二份开放工单唯一冲突、修改/删除方案/证据/资金事实失败。历史完成审计含 completedAt 时回填相同时间，无证据时保持 null。
 
 ```ts
 it('pins the inclusive net compensation ceiling', () => {
@@ -68,10 +68,10 @@ it('pins the inclusive net compensation ceiling', () => {
   expect(NetCompensationSchema.parse({ amountFen: 0, payer: 'NONE' }).payer).toBe('NONE');
 });
 ```
-- [ ] **Step 2: RED。** `npm test --workspace @barter/contracts -- src/after-sales.test.ts`；先新增最小 phase4 config/自有数据库入口，再运行 `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/persistence.e2e-spec.ts`，确认失败来自缺少模型/约束而非污染源库。
-- [ ] **Step 3: 实现模型、契约与迁移。** 建立设计第 10 节模型；加 Order.completedAt、根争议/原支付唯一引用、私有证据存储键和归还地址加密元数据、明确 hold blockers、期限延长记录。开放工单部分唯一索引；资金金额及去向约束；不可修改触发器。更新正常结算写 completedAt，回填只解析可信 ORDER_COMPLETED 审计，禁止用 updatedAt。先核对本地 Prisma 7 CLI 帮助，再生成/审阅迁移，只对拥有的临时库 migrate deploy。phase4 runner 不被 legacy runner 重复发现；测试库可复用现有安全的 phase3 namespace 工具，不另造无清理验证的创建库脚本。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、`npm run typecheck --workspace @barter/api`、既有数据库隔离与迁移兼容测试；证实旧三份迁移文件不变、源库表计数/迁移记录不变、临时库清理成功。
-- [ ] **Step 5: 审查与提交。** 两次独立审查通过后提交 `feat: add after-sales contracts and persistence`；只暂存本任务契约、模型、迁移和测试入口文件。
+- [x] **Step 2: RED。** `npm test --workspace @barter/contracts -- src/after-sales.test.ts`；先新增最小 phase4 config/自有数据库入口，再运行 `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/persistence.e2e-spec.ts`，确认失败来自缺少模型/约束而非污染源库。
+- [x] **Step 3: 实现模型、契约与迁移。** 建立设计第 10 节模型；加 Order.completedAt、根争议/原支付唯一引用、私有证据存储键和归还地址加密元数据、明确 hold blockers、期限延长记录。开放工单部分唯一索引；资金金额及去向约束；不可修改触发器。更新正常结算写 completedAt，回填只解析可信 ORDER_COMPLETED 审计，禁止用 updatedAt。先核对本地 Prisma 7 CLI 帮助，再生成/审阅迁移，只对拥有的临时库 migrate deploy。phase4 runner 不被 legacy runner 重复发现；测试库可复用现有安全的 phase3 namespace 工具，不另造无清理验证的创建库脚本。
+- [x] **Step 4: GREEN。** 重跑 Step 2、`npm run typecheck --workspace @barter/api`、既有数据库隔离与迁移兼容测试；证实旧三份迁移文件不变、源库表计数/迁移记录不变、临时库清理成功。
+- [x] **Step 5: 审查与提交。** 为提供可复查的提交差异，先提交候选 `feat: add after-sales contracts and persistence`，两项独立审查及修正复查通过后才标记任务完成；只暂存本任务契约、模型、迁移和测试入口文件。
 
 ### Task 2: 运营设备会话与动作级重新验证
 
@@ -249,4 +249,14 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。14项任务均未完成，逐任务 RED/GREEN、审查、提交与最终六条门槛尚无本阶段结果。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Task 1 已完成，Tasks 2～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+
+### Task 1 实际结果
+
+- 提交：`238be4e`（共享契约、持久化及测试底座）；`c5a65a8`（审查后补齐资金持久化校验）。
+- RED：新契约初始20项、新模型初始6项失败，原因均为缺少实现；审查修正新增35项中11项失败，复现空 JSON、缺失/错误回转来源及旧事务快照下两个资金终态共存。
+- GREEN：契约66项；候选 `238be4e` 全仓 `npm test` 642项退出0。修正后 Phase4 专项48项通过，最终新用例文件39项通过；历史迁移兼容1项、API lint/typecheck退出0。642项不是修正后的全仓结果，未混用证据。
+- 两位独立代理分别审查需求及质量，发现三项 Important；原实现代理修正后，两位新的独立 scoped 复查代理均确认全部已处理、无新增阻断问题。
+- 原三份历史迁移未改；各阶段测试源库表计数/迁移记录不变、归属临时库全部清理。该证明不是源数据逐行快照。没有 reset、强制 DROP、SQLite 或真实外部资金业务。
+- 普通 Git 行尾提示仍有记录，不是测试 warning。非阻断项：REJECT 理由 null 的 SQL CHECK 留 Task5 补行为测试与约束；旧持久化测试的前序数据依赖留整分支审查核对。
+- 兼容性裁定：`applyMigrations` 默认仍执行所有当前迁移，仅历史三迁移测试显式指定数量3；Phase4 复用经过清理验证的 Phase3 归属库工具及订单 HTTP 测试流程。
