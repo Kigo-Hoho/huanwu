@@ -16,6 +16,11 @@ export const CaseCommandSchema = z.strictObject({ expectedCaseVersion: version, 
 export const CreateCaseSchema = z.strictObject({ expectedOrderVersion: version, reason: text(1, 2000), previousCaseId: uuid.optional() });
 export const ResolutionCommandSchema = z.strictObject({ ...CaseCommandSchema.shape, resolutionVersion: version });
 export const CaseResponseSchema = z.strictObject({ ...CaseCommandSchema.shape, description: text(1, 2000) });
+export const CaseWithdrawalSchema = z.strictObject({ ...CaseCommandSchema.shape, reason: text(1, 2000) });
+export const CaseWithdrawalResponseSchema = z.strictObject({ ...CaseCommandSchema.shape, withdrawalRequestId: uuid, decision: ResolutionDecisionSchema, reason: text(1, 2000).optional() })
+  .refine(v => v.decision !== 'REJECT' || Boolean(v.reason), 'Rejection requires a reason');
+export const CaseEvidenceRequestSchema = z.strictObject({ ...CaseCommandSchema.shape, side: OrderSideSchema, reason: text(1, 2000) });
+export const CaseRejectSchema = z.strictObject({ ...CaseCommandSchema.shape, reason: text(1, 2000) });
 export const ResolutionConsentSchema = z.strictObject({ ...ResolutionCommandSchema.shape, decision: ResolutionDecisionSchema, reason: text(1, 2000).optional() })
   .refine(v => v.decision !== 'REJECT' || Boolean(v.reason), 'Rejection requires a reason');
 export const NetCompensationSchema = z.strictObject({ amountFen: z.number().int().min(0).max(60000), payer: ProposalPayerSchema })
@@ -52,11 +57,22 @@ export const CaseViewSchema = z.strictObject({
   reason: text(1, 2000), currentResolutionVersion: version.nullable(), responseDeadline: time.nullable(), agreementDeadline: time.nullable(),
   createdAt: time, updatedAt: time,
 });
-export const AdminCaseViewSchema = CaseViewSchema;
+// Keep the management projection explicit: later participant-only fields must
+// never become visible to operators by extending the customer schema.
+export const AdminCaseViewSchema = z.strictObject({
+  id: uuid, orderId: uuid, rootDisputeId: uuid, status: CaseStatusSchema, version,
+  reason: text(1, 2000), currentResolutionVersion: version.nullable(), responseDeadline: time.nullable(), agreementDeadline: time.nullable(),
+  createdAt: time, updatedAt: time,
+});
 export const CaseListViewSchema = z.strictObject({ items: z.array(CaseViewSchema), nextCursor: z.string().nullable() });
 export const CaseListQuerySchema = z.strictObject({ cursor: z.string().min(1).optional(), limit: z.coerce.number().int().min(1).max(50).default(20), status: CaseStatusSchema.optional() });
 export const CaseCommandResultSchema = z.strictObject({ case: CaseViewSchema, orderVersion: version });
+export const AdminCaseCommandResultSchema = z.strictObject({ case: AdminCaseViewSchema, orderVersion: version });
 export const CaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
+export const AdminCaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
+export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema) });
+export const AdminCaseDetailViewSchema = z.strictObject({ ...AdminCaseViewSchema.shape, records: z.array(AdminCaseRecordViewSchema) });
+export const AdminCaseListViewSchema = z.strictObject({ items: z.array(AdminCaseViewSchema), nextCursor: z.string().nullable() });
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 export type ResolutionType = z.infer<typeof ResolutionTypeSchema>;
 export type ResolutionDecision = z.infer<typeof ResolutionDecisionSchema>;
@@ -69,6 +85,10 @@ export type CaseCommandInput = z.infer<typeof CaseCommandSchema>;
 export type CreateCaseInput = z.infer<typeof CreateCaseSchema>;
 export type ResolutionCommandInput = z.infer<typeof ResolutionCommandSchema>;
 export type CaseResponseInput = z.infer<typeof CaseResponseSchema>;
+export type CaseWithdrawalInput = z.infer<typeof CaseWithdrawalSchema>;
+export type CaseWithdrawalResponseInput = z.infer<typeof CaseWithdrawalResponseSchema>;
+export type CaseEvidenceRequestInput = z.infer<typeof CaseEvidenceRequestSchema>;
+export type CaseRejectInput = z.infer<typeof CaseRejectSchema>;
 export type ResolutionConsentInput = z.infer<typeof ResolutionConsentSchema>;
 export type ResolutionInput = z.infer<typeof ResolutionInputSchema>;
 export type NetCompensation = z.infer<typeof NetCompensationSchema>;
@@ -79,3 +99,8 @@ export type CaseListView = z.infer<typeof CaseListViewSchema>;
 export type CaseListQuery = z.infer<typeof CaseListQuerySchema>;
 export type CaseCommandResult = z.infer<typeof CaseCommandResultSchema>;
 export type CaseRecordView = z.infer<typeof CaseRecordViewSchema>;
+export type AdminCaseRecordView = z.infer<typeof AdminCaseRecordViewSchema>;
+export type CaseDetailView = z.infer<typeof CaseDetailViewSchema>;
+export type AdminCaseDetailView = z.infer<typeof AdminCaseDetailViewSchema>;
+export type AdminCaseListView = z.infer<typeof AdminCaseListViewSchema>;
+export type AdminCaseCommandResult = z.infer<typeof AdminCaseCommandResultSchema>;

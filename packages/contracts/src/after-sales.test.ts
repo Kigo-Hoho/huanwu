@@ -55,3 +55,16 @@ it('validates a complete resolution and derives its net direction from bounded c
   expect(resolution.safeParse({ ...input, netCompensation: { amountFen: 400, payer: 'RECIPIENT' } }).success).toBe(false);
   expect(resolution.safeParse({ ...input, orderOutcome: 'CANCEL' }).success).toBe(false);
 });
+it('keeps management case, record, detail and command projections strictly redacted', () => {
+  const view = { id, orderId: id, rootDisputeId: id, status: 'OPEN', version: 1, reason: '核验物品争议', currentResolutionVersion: null, responseDeadline: null, agreementDeadline: null, createdAt: now, updatedAt: now };
+  const record = { id, kind: 'RESPONSE', actorKind: 'CUSTOMER', side: 'INITIATOR', description: '补充事实说明', createdAt: now };
+  expect(schema('AdminCaseViewSchema').safeParse(view).success).toBe(true);
+  expect(schema('AdminCaseRecordViewSchema').safeParse(record).success).toBe(true);
+  expect(schema('AdminCaseDetailViewSchema').safeParse({ ...view, records: [record] }).success).toBe(true);
+  expect(schema('AdminCaseCommandResultSchema').safeParse({ case: view, orderVersion: 2 }).success).toBe(true);
+  for (const privateField of ['actorId', 'storageKey', 'address', 'checkoutParams']) {
+    expect(schema('AdminCaseRecordViewSchema').safeParse({ ...record, [privateField]: 'private' }).success).toBe(false);
+    expect(schema('AdminCaseDetailViewSchema').safeParse({ ...view, records: [{ ...record, [privateField]: 'private' }] }).success).toBe(false);
+    expect(schema('AdminCaseCommandResultSchema').safeParse({ case: { ...view, [privateField]: 'private' }, orderVersion: 2 }).success).toBe(false);
+  }
+});

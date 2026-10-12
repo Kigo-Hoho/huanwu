@@ -16,9 +16,10 @@ import { TestingIntegrationsController } from './integrations/testing-integratio
 import { LogisticsModule } from './logistics/logistics.module.js';
 import { TestingLogisticsController } from './integrations/testing-logistics.controller.js';
 import { OperatorSecurityModule } from './operator-security/operator-security.module.js';
+import { AfterSalesModule } from './after-sales/after-sales.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule, AfterSalesModule],
   controllers: [HealthController],
   providers: [
     {

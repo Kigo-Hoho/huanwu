@@ -152,6 +152,12 @@ ActionGrant 绑定 actor、session、device、action、资源 ID、完整 `expec
 
 主要错误：AFTER_SALES_NOT_ELIGIBLE、AFTER_SALES_ALREADY_OPEN、CASE_VERSION_CONFLICT、ORDER_VERSION_CONFLICT、RESOLUTION_VERSION_CONFLICT、EVIDENCE_LIMIT_EXCEEDED、RETURN_NOT_READY、FUNDS_UNRESOLVED、TRADING_FROZEN、RISK_BLOCKS_RESUME、REAUTH_REQUIRED、DESKTOP_SESSION_REQUIRED、APPROVAL_REQUIRED、GRANT_INVALID。并发/状态竞争返回 409，身份错误 401，权限错误 403，跨用户不存在性统一 404，输入错误 400，适配器不可用 503。
 
+Task3 基础处理契约澄清（2026-10-12）：创建输入为 `expectedOrderVersion/reason/previousCaseId?`；后续工单通过不可修改 OPENED 记录关联前序关闭结果，服务端沿关联继承根争议，不能用导入记录的时间戳推断前序。历史 `completedAt` 缺失或前序关联有歧义时返回 409 `AFTER_SALES_NOT_ELIGIBLE`，错误 `details.manualVerificationRequired=true`。CANCELLED 的资格根据关联原支付、原退款及未知指令事实判定，不根据说明文本。
+
+基础回应 `POST /api/after-sales/:id/response` 收 `expectedCaseVersion/expectedOrderVersion/description`；撤回请求 `/withdraw` 收两版本和 `reason`，另一方 `/withdraw/respond` 收两版本、不可修改的 `withdrawalRequestId`、`decision=AGREE|REJECT`，拒绝必须提供理由。关联 order/root 的活跃风险、明确暂停 blocker、待核验外部事实及未完成义务阻止关闭；用户交易冻结状态本身不自动成为任意订单的关闭 blocker。既有义务只读取各领域持久化完成标记与已确认资金事实，缺失或 UNKNOWN 转核验，不在基础关闭命令中伪造完成。
+
+绑定会话的 OPERATIONS/SUPER_ADMIN 可通过 `POST /api/admin/after-sales/:id/request-evidence` 提交两版本、`side` 和 `reason`；普通工单 `/reject` 提交两版本与不可修改驳回理由。基础驳回不处置当前方案，客户拒绝实际方案仍属于后续方案契约。客户与管理详情增加脱敏 `records` 时间线，记录只包含 id、kind、actorKind、side、description 和 createdAt；管理列表、详情与命令响应使用独立显式投影，不随客户视图自动扩充。详情以同一数据库快照读取工单版本与记录。
+
 ## 11. 事务、并发与异步一致性
 
 统一锁顺序：需要检查交易限制时先锁涉及用户限制行（按用户 ID 排序），再按第三阶段顺序锁来源提案（若需要）→订单→工单/当前方案→物品及占用（排序）→资金/退货/审批/授权记录。只访问工单的命令仍先定位并锁其订单，不出现工单→订单反向锁。冻结只操作限制行，不在同一事务遍历订单，避免形成反向锁。回调先由不可修改元数据找到订单，再按同一顺序加锁。
