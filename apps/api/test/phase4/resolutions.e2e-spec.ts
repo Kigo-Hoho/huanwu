@@ -188,7 +188,7 @@ it('drafts from OPEN, gives a 72-hour response deadline and never accepts goods 
   expect(await h.prisma.resolutionExecution.count({ where: { resolution: { caseId: f.opened.case.id } } })).toBe(0);
   expect((await h.prisma.orderPartyProgress.findMany({ where: { orderId: f.order.id } })).every(p => p.acceptedAt === null)).toBe(true);
   expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('ON_HOLD');
-  await ops.post(f.path.replace('/resolutions', '/execute'), { ...versions(result.body), resolutionVersion: 1 }).expect(404);
+  await ops.post(f.path.replace('/resolutions', '/execute'), { ...versions(result.body), resolutionVersion: 1 }).expect(403);
 });
 it('binds each consent to its own participant and invalidates old confirmations with a new proposal', async () => {
   const f = await fixture(); const ops = await operator();

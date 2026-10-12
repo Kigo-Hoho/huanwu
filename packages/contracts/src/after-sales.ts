@@ -26,6 +26,8 @@ export const CaseRejectSchema = z.strictObject({ ...CaseCommandSchema.shape, rea
 export const ResolutionConsentSchema = z.strictObject({ ...ResolutionCommandSchema.shape, decision: ResolutionDecisionSchema, reason: text(1, 2000).optional() })
   .refine(v => v.decision !== 'REJECT' || Boolean(v.reason), 'Rejection requires a reason');
 export const ResolutionAdjudicationSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), evidenceIds: z.array(uuid).max(60).refine(distinct), operatorAction: OperatorActionContextSchema });
+export const ResolutionApprovalSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), operatorAction: OperatorActionContextSchema });
+export const ResolutionExecutionSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), operatorAction: OperatorActionContextSchema });
 export const NetCompensationSchema = z.strictObject({ amountFen: z.number().int().min(0).max(60000), payer: ProposalPayerSchema })
   .refine(v => v.amountFen === 0 ? v.payer === 'NONE' : v.payer !== 'NONE', 'Zero compensation requires NONE; positive compensation requires a payer');
 export const CompensationComponentsSchema = z.strictObject({
@@ -111,6 +113,8 @@ export type CaseEvidenceRequestInput = z.infer<typeof CaseEvidenceRequestSchema>
 export type CaseRejectInput = z.infer<typeof CaseRejectSchema>;
 export type ResolutionConsentInput = z.infer<typeof ResolutionConsentSchema>;
 export type ResolutionAdjudicationInput = z.infer<typeof ResolutionAdjudicationSchema>;
+export type ResolutionApprovalInput = z.infer<typeof ResolutionApprovalSchema>;
+export type ResolutionExecutionInput = z.infer<typeof ResolutionExecutionSchema>;
 export type ResolutionInput = z.infer<typeof ResolutionInputSchema>;
 export type NetCompensation = z.infer<typeof NetCompensationSchema>;
 export type CompensationComponents = z.infer<typeof CompensationComponentsSchema>;

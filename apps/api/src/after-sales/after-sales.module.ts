@@ -12,11 +12,15 @@ import { AdminAfterSalesController, AfterSalesController } from './after-sales.c
 import { AfterSalesService } from './after-sales.service.js';
 import { CaseCommandsService } from './case-commands.service.js';
 import { CaseRecordsService } from './case-records.service.js';
+import { ResolutionApprovalService } from './resolution-approval.service.js';
+import { ResolutionExecutionService } from './resolution-execution.service.js';
+import { RESOLUTION_EXECUTORS } from './resolution-executor.port.js';
 
 @Module({
   imports: [DatabaseModule, AuthModule, AuditModule, ClockModule, OrdersModule, OperatorSecurityModule],
   controllers: [AfterSalesController, AdminAfterSalesController, AdminResolutionController],
-  providers: [AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, AdminAfterSalesService],
-  exports: [AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService],
+  providers: [AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, AdminAfterSalesService, ResolutionApprovalService, ResolutionExecutionService,
+    { provide: RESOLUTION_EXECUTORS, useFactory: () => new Map() }],
+  exports: [AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, ResolutionApprovalService, ResolutionExecutionService, RESOLUTION_EXECUTORS],
 })
 export class AfterSalesModule {}
