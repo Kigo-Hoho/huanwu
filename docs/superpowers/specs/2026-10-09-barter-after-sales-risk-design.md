@@ -62,7 +62,7 @@ Task4 接口澄清（2026-10-12）：`POST /api/after-sales/:id/evidence` 使用
 
 方案类型为 `CONTINUE_EXCHANGE`、`RETURN_ORIGINALS`、`KEEP_WITH_COMPENSATION`、`CANCEL_BEFORE_HANDOVER`、`FUNDS_ONLY`。每个方案必须明确每一笔原保证金/差价的去向、退货双方义务，以及订单收尾结果。不能提交“以后由后台决定”的资金状态。
 
-CONTINUE_EXCHANGE 的执行完成条件是风险解除、期限与状态安全恢复，此时工单即可结案，后续正常履约仍由订单负责。RETURN_ORIGINALS/CANCEL_BEFORE_HANDOVER 的非终态订单在履行归还及退款义务后进入 CANCELLED；KEEP_WITH_COMPENSATION 在双方各自明确确认已收到并保留全部物品、补偿及原正常结算完成后进入 COMPLETED，方案同意不能代替物品验收。FUNDS_ONLY 不修改已终结订单状态。终态订单上的任何方案只记录售后结果，不改写历史终态。
+CONTINUE_EXCHANGE 在风险解除、期限与订单状态安全恢复后允许正常履约继续由订单负责。若方案没有独立补偿义务，且其他订单收尾义务均已完成，此时工单即可结案；若方案含独立补偿，安全恢复后的正常履约可以继续，但售后工单保持开放，直至补偿收款及转付均有可信完成事实。该关闭条件遵守所有资金与订单收尾义务完成后才能进入 `RESOLVED` 的规则。实现澄清（2026-10-12）：继续交换方案可以同时约定独立净补偿；其不改变原保证金或原交换条款，执行仍需要资金审批和独立补偿事实核验。RETURN_ORIGINALS/CANCEL_BEFORE_HANDOVER 的非终态订单在履行归还及退款义务后进入 CANCELLED；KEEP_WITH_COMPENSATION 在双方各自明确确认已收到并保留全部物品、补偿及原正常结算完成后进入 COMPLETED，方案同意不能代替物品验收。FUNDS_ONLY 不修改已终结订单状态。终态订单上的任何方案只记录售后结果，不改写历史终态。
 
 未进入 EXECUTING 前可以提出新版本；开始执行后不得换方案绕过在途资金或退货，必须先完成对账、关闭可安全关闭的义务并记录明确终止结果，才允许提交后续方案。每项原差价回转、退款与补偿使用根争议及原支付引用去重，不能通过新建工单重复回转同一笔原差价。
 

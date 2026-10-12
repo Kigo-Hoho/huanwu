@@ -123,11 +123,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `ResolutionService.propose(operator, caseId, input, key): Promise<CaseCommandResult>`、`consent(context, input): Promise<CaseCommandResult>`、`adjudicate(operatorContext, input, key): Promise<CaseCommandResult>`；`resolveCompensation(input, originalDifferenceFen): NetCompensation`（Task 1类型），每项明示方向和非负金额，净额服务端推导。
 
-- [ ] **Step 1: 写失败测试。** 新版本使旧双方确认失效；两方仅自己确认；起草方案不代表用户验收；额外/运费20001拒绝、总净额60001拒绝，净零payer=NONE。EXECUTING 禁止直接换方案，终态订单方案不能倒退状态。必须回归修复 Task1 审查发现的数据库约束：REJECT 的理由不能接受 SQL NULL；通过真实 PostgreSQL 失败测试确认旧缺陷，再加新迁移约束并验证审计/裁决仍不可修改。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/resolutions.e2e-spec.ts`。
-- [ ] **Step 3: 实现五类方案。** OPEN 可直接进入 UNDER_REVIEW 后起草，无需虚构补证。校验物品快照属于该订单；每个原款目标由服务端计划推导，禁止任意收款账号和业务号。客服可起草/补证，风控不能越权裁决资金；裁决保存证据与理由，不虚构同意。执行入口在 Task 6 授权后接通，之前明确不能执行，不提交假成功。
-- [ ] **Step 4: GREEN。** 重跑 Step 2；验证方案、确认、记录不可修改触发器与新版本冲突。
-- [ ] **Step 5: 审查与提交。** `feat: add versioned after-sales resolutions and consent`。
+- [x] **Step 1: 写失败测试。** 新版本使旧双方确认失效；两方仅自己确认；起草方案不代表用户验收；额外/运费20001拒绝、总净额60001拒绝，净零payer=NONE。EXECUTING 禁止直接换方案，终态订单方案不能倒退状态。必须回归修复 Task1 审查发现的数据库约束：REJECT 的理由不能接受 SQL NULL；通过真实 PostgreSQL 失败测试确认旧缺陷，再加新迁移约束并验证审计/裁决仍不可修改。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/resolutions.e2e-spec.ts`。
+- [x] **Step 3: 实现五类方案。** OPEN 可直接进入 UNDER_REVIEW 后起草，无需虚构补证。校验物品快照属于该订单；每个原款目标由服务端计划推导，禁止任意收款账号和业务号。客服可起草/补证，风控不能越权裁决资金；裁决保存证据与理由，不虚构同意。CONTINUE_EXCHANGE 可含独立净补偿并保留原保证金及交换条款；安全恢复后可继续履约，但未结补偿阻止工单结案。执行入口在 Task 6 授权后接通，之前明确不能执行，不提交假成功。
+- [x] **Step 4: GREEN。** 重跑 Step 2；验证方案、确认、记录不可修改触发器与新版本冲突。
+- [x] **Step 5: 审查与提交。** `feat: add versioned after-sales resolutions and consent`。
 
 ### Task 6: 双人资金审批与方案执行授权
 
@@ -174,7 +174,7 @@ it('pins the inclusive net compensation ceiling', () => {
 - [ ] **Step 1: 写失败测试。** 未审批不出款、裁决不主动扣客户款；净额60000通过/60001拒绝；退款与转付互斥、原差价不重复回转、原保证金无罚扣。乱序转付/退款事件先保存，收款到账后按原号补核验；外部成功但本地审计失败再次对账不二次执行；UNKNOWN始终保留占用。
 - [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/compensation.e2e-spec.ts test/phase4/after-sales-financial-races.e2e-spec.ts`。
 - [ ] **Step 3: 实现独立资金域。** 新业务号 `compensation:payment:<paymentId>`、`compensation:refund:<paymentId>`、`compensation:disburse:<paymentId>` 全程稳定。引用方案/根争议/原支付、金额/币种/付款收款侧，独立账本唯一事实。原款退款沿用 `refund:<intentId>`，不改原PaymentPurpose唯一规则。对账可以入账既有外部事实，execute必须持合法且当前义务授权；处理并发authorize→I/O时间窗，记录在途执行认领，方案改动必须等待已认领业务核验。关闭/退款/转付状态互斥在模拟供应商和本地都保证；通用响应/幂等/审计不能保存checkout。测试驱动只在显式dev/test或acceptance H5启用，生产拒绝。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、原订单支付/退款/结算、outbox lease与未知回调回归；断言同一根义务付款/退款/转付次数与金额守恒。
+- [ ] **Step 4: GREEN。** 重跑 Step 2、原订单支付/退款/结算、outbox lease与未知回调回归；断言同一根义务付款/退款/转付次数与金额守恒。若 CONTINUE_EXCHANGE 有独立补偿，未支付或转付 UNKNOWN 时 `CaseFundsStatus.complete=false`，不能报告工单资金义务完成。
 - [ ] **Step 5: 审查与提交。** `feat: add independently reconciled simulated compensation`。
 
 ### Task 10: 安全恢复、方案收尾与占用释放
@@ -183,9 +183,9 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `OrderInterventionService.resumeInTransaction(ctx, resolution): Promise<void>`、`extendDeadlineInTransaction(ctx, {kind,side?}): Promise<void>`；`CaseFinalizationService.reconcile(caseId): Promise<boolean>`、`reconcileInTransaction(ctx): Promise<boolean>`。订单快照、资金和归还结果通过公开读/事务端口获得，不直接调用第三阶段私有方法。
 
-- [ ] **Step 1: 写失败测试。** 六件物品仅五件归还、资金未知或活跃风险存在时 `expect(await reconcile(id)).toBe(false)` 且全部原占用仍在；完整处理后仅释放本订单占用；终态订单售后不抢占后来订单。恢复由最新事实推导，不盲用holdPreviousStatus；延期同类第二次拒绝，新截止=服务器批准时间+72小时。
+- [ ] **Step 1: 写失败测试。** 六件物品仅五件归还、资金未知或活跃风险存在时 `expect(await reconcile(id)).toBe(false)` 且全部原占用仍在；完整处理后仅释放本订单占用；终态订单售后不抢占后来订单。CONTINUE_EXCHANGE 安全恢复后可继续普通履约；若有独立补偿，未支付或转付 UNKNOWN 时工单保持非终态，不重复释放或反向暂停已安全恢复的订单；补偿可信完成后只结案一次。恢复由最新事实推导，不盲用holdPreviousStatus；延期同类第二次拒绝，新截止=服务器批准时间+72小时。
 - [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/case-finalization.e2e-spec.ts test/phase4/case-resume.e2e-spec.ts`。
-- [ ] **Step 3: 接通五类执行与收尾。** Return/cancel全部义务完成才CANCELLED；交付过/质量争议物品INACTIVE，未交付且无风险安全取消恢复ACTIVE；KEEP要求每方自有独立“收到且保留全部物品”确认，不能把consent当acceptedAt，也不能运营代签，之后补偿+原结算完才COMPLETED。CONTINUE安全恢复后立即结工单不阻塞正常履约；FUNDS_ONLY不改旧终态。允许明确无法归还的裁决需证据、责任、已批准资金目标，标注“裁决处置”而非“用户确认归还”。风险仍有任何独立阻塞不解除；旧未知资金优先核验、已发外部指令不得撤销。完成状态、物品、占用、审计同事务；回调重入不重复结案。
+- [ ] **Step 3: 接通五类执行与收尾。** Return/cancel全部义务完成才CANCELLED；交付过/质量争议物品INACTIVE，未交付且无风险安全取消恢复ACTIVE；KEEP要求每方自有独立“收到且保留全部物品”确认，不能把consent当acceptedAt，也不能运营代签，之后补偿+原结算完才COMPLETED。CONTINUE安全恢复可继续普通履约；无独立补偿且其他收尾义务已完成时结案，有独立补偿时工单保持开放直到收款和转付均由可信事实确认完成。FUNDS_ONLY不改旧终态。允许明确无法归还的裁决需证据、责任、已批准资金目标，标注“裁决处置”而非“用户确认归还”。风险仍有任何独立阻塞不解除；旧未知资金优先核验、已发外部指令不得撤销。完成状态、物品、占用、审计同事务；回调重入不重复结案。
 - [ ] **Step 4: GREEN。** 重跑 Step 2、Tasks8/9和原第三阶段完成/取消/迟到事件测试，审计故障注入证明无部分释放。
 - [ ] **Step 5: 审查与提交。** `feat: finalize after-sales obligations and controlled order recovery`。
 
@@ -257,7 +257,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～4 已完成，Tasks 5～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～5 已完成，Tasks 6～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
 
 ### Task 1 实际结果
 
@@ -266,7 +266,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - GREEN：契约66项；候选 `238be4e` 全仓 `npm test` 642项退出0。修正后 Phase4 专项48项通过，最终新用例文件39项通过；历史迁移兼容1项、API lint/typecheck退出0。642项不是修正后的全仓结果，未混用证据。
 - 两位独立代理分别审查需求及质量，发现三项 Important；原实现代理修正后，两位新的独立 scoped 复查代理均确认全部已处理、无新增阻断问题。
 - 原三份历史迁移未改；各阶段测试源库表计数/迁移记录不变、归属临时库全部清理。该证明不是源数据逐行快照。没有 reset、强制 DROP、SQLite 或真实外部资金业务。
-- 普通 Git 行尾提示仍有记录，不是测试 warning。非阻断项：REJECT 理由 null 的 SQL CHECK 留 Task5 补行为测试与约束；旧持久化测试的前序数据依赖留整分支审查核对。
+- 普通 Git 行尾提示仍有记录，不是测试 warning。Task5 已用真实 PostgreSQL RED/GREEN 修复 REJECT 理由为 SQL NULL 时 CHECK 三值逻辑放行的问题；旧持久化测试的前序数据依赖留整分支审查核对。
 - 兼容性裁定：`applyMigrations` 默认仍执行所有当前迁移，仅历史三迁移测试显式指定数量3；Phase4 复用经过清理验证的 Phase3 归属库工具及订单 HTTP 测试流程。
 
 ### Task 2 实际结果（2026-10-10）
@@ -296,3 +296,12 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - 修复后专项：清理/证据测试25项通过，证据单测及旧公开上传回归24项通过，共享契约17项通过，API lint/typecheck通过。候选 `3ab1705` 的全仓 npm test 为809项通过；此全仓结果属于修复前候选，不作为 `babe6a6` 的全仓验证。本任务修复后没有重跑全仓套件，阶段末六项门槛仍待执行。
 - 独立规范复审通过，确认原有重要问题均修正、无新增问题。独立质量复审批准并记录一项非阻断 Minor：其他实例删除READY任务后，原实例的进程内 `ended` 集合可能留有无用UUID；不影响持久回收或业务结果，交由最终整分支审查处理。原两项Important（部分写入归属丢失、清理失败覆盖业务结果/遗失后续对象）均有真实失败复现和修复后测试证据。
 - 迁移只新增清理任务表，没有改写既有迁移。测试证明限定源库表计数/迁移记录及临时归属库清理，不宣称源数据逐行相等；仅使用私有本地临时PostgreSQL，未用SQLite或真实外部服务。
+
+### Task 5 实际结果（2026-10-12）
+
+- 提交：`ed29a7f`（不可修改方案、客户确认与裁决）；`6412286`（最终裁决审计失败后的真实事务回滚覆盖）。独立复审范围：原候选 `5f147d7..ed29a7f`；修复 `ed29a7f..6412286`。
+- 建立五类不可修改方案、逐参与方当前版本同意/拒绝、独立超级管理员裁决和严格管理端方案上下文。所有资金目标/金额方向/净额/订单结果由服务端从锁定事实推导并校验客户端主张；不生成资金执行、订单恢复、物品验收、批准或虚假成功。仅新增迁移 `20261012170000_resolution_consent_reason`，显式拒绝 REJECT + SQL NULL，既有已应用迁移及不可修改历史未被改写。
+- 方案管理视图只返回已允许的物品快照、侧别/履约状态及确认资金事实，不含用户标识、地址、checkout、凭据或原始外部数据；客户详情不包含该上下文。CONTINUE_EXCHANGE 可同时约定独立净补偿，原保证金和交换条款保持不变；补偿仍待后续审批、执行和可信事实。
+- RED/GREEN：初始有效 PostgreSQL 运行 7/8失败，其中原始SQL插入 REJECT+NULL 成功证实约束缺陷；缺少路由为404。扩展11项中10项失败，覆盖裁决权限与投影。新增管理上下文和 CONTINUE+400分方案也各自先观察RED；修复后方案专项21/21，Phase4 API全套195/195，契约专项15/15通过。最终候选 `ed29a7f` 全仓843/843；审计修复后最终全仓844/844（root12/admin29/API146/Phase3 API261/Phase4 API198/miniapp128/contracts70）。最终API lint、API typecheck、contracts typecheck与diff-check均退出0；契约工作区没有独立lint脚本。
+- 审查：初始独立规范复审通过；质量复审提出一项非阻断的最终业务审计回滚测试缺口，新增真实 audit INSERT 后故障、完整事务状态快照回滚及同grant/key重试/重放。两位新的 scoped 复审代理确认该问题已解决、无新增Critical/Important/Minor。CONTINUE补偿结案条件也已同步写入本设计及Task9/10计划：普通履约可继续，但补偿和转付未核验完成时工单保持开放。质量复审指出的 earlier spec minor已在公共文档中明确修正。
+- 每次 PostgreSQL 验证使用自有命名空间与普通清理；报告证明源表计数/迁移记录不变、测试库清空，不宣称逐行/逐字节源数据相等。完整候选全仓测试存在一次与最后两处修改重叠的失败运行，已原样记录；稳定代码上的最终完整运行844/844退出0，未把重叠运行称为通过。无真实资金/物流服务、SQLite、历史迁移改写、推送或合并。
