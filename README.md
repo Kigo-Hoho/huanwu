@@ -159,4 +159,8 @@ Phase 2 的 CONFIRMED 表示最新方案的所有 2～6 件物品被独占占用
 
 `NODE_ENV=development/test` 使用 `LOCAL_PRIVATE_EVIDENCE_DIR`（默认 `.local/private-evidence`），该目录必须与 `LOCAL_IMAGE_STORAGE_DIR` 分离且不得对外静态发布。对象使用随机不透明键，仅上传自己的孤立对象可以有限清理，已被元数据引用的对象不删除。生产没有私有存储适配器时返回 503，不回退本地目录。生产部署仍需自行接入并验证私有存储及访问控制。举报附件服务已定义并验证授权隔离，举报业务路由留给 Task7。
 
+内部 `EvidenceCleanupJob` 在写文件前持久登记同一上传者生成的 owner 及最多 18 个对象描述符（不是公开 DTO、幂等结果或审计）。独占创建成功后，先持久确认 `OWNED` 再写入图片字节；`EEXIST` 不产生删除权限。元数据提交事务锁住任务并标为 `READY`；业务失败也单独结束登记，回收故障保留任务且不改变原业务响应。每次回收重新查询实际附件引用，逐个处理，失败不阻断同批其余对象。未确认归属的 `PLANNED` 现存文件保留待核验，不推定为本次创建。
+
+本地适配器的有界回收每分钟运行一次，每轮最多检查 10 个 `OPEN` 和 10 个 `READY` 任务，每项最多 18 个对象；游标轮转避免旧待核验任务挡住新任务。测试关闭定时器，通过 `EvidenceCleanupService.drain(limit)` 显式验证。`OPEN` 不按时间自动删除：只在同主机和相同存储目录 scope，且本实例已确认请求结束，或原 PID 已明确退出时恢复。存活／复用 PID、不同主机或目录、无法判断的进程以及归属确认失败均保留待人工核验，不扫描目录猜测文件归属。迁移 `20261012160000_private_evidence_cleanup_jobs` 只新增内部任务表；生产缺私有适配器时不会启用本地回收。
+
 API 新增 `sharp`，当前锁定 0.35.5。保留平台可选原生依赖；当前安装版本没有 `preinstall/install/postinstall` 生命周期脚本，未增加无用的 npm `allowScripts`。实际解码与元数据限制参照 [sharp 构造选项](https://sharp.pixelplumbing.com/api-constructor/)、[输出说明](https://sharp.pixelplumbing.com/api-output/)及[安装文档](https://sharp.pixelplumbing.com/install/)。

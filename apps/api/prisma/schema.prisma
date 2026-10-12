@@ -1212,6 +1212,20 @@ model OrderHoldBlocker {
   @@index([orderId, resolvedAt])
 }
 
+// Private operational recovery work, never a public DTO or business audit.
+model EvidenceCleanupJob {
+  id              String   @id @db.Uuid
+  creatorInstance String   @db.Uuid
+  creatorPid      Int
+  creatorHost     String
+  storageScope    String
+  state           String   @default("OPEN")
+  objects         Json
+  createdAt       DateTime @default(now())
+
+  @@index([creatorHost, storageScope, state, createdAt])
+}
+
 model OrderDeadlineExtension {
   id               String            @id @default(uuid()) @db.Uuid
   orderId          String            @db.Uuid

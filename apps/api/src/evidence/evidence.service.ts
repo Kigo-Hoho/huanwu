@@ -12,6 +12,7 @@ import type { CaseEvidence, Prisma, RiskReport } from '../generated/prisma/clien
 import { canonicalHash, type OperatorSessionContext } from '../operator-security/operator-action.types.js';
 import { OperatorSessionService } from '../operator-security/operator-session.service.js';
 import { EvidenceImageValidator } from './evidence-image-validator.js';
+import { EvidenceCleanupService } from './evidence-cleanup.service.js';
 import { EVIDENCE_STORAGE_PORT, type EvidenceStoragePort, type EvidenceUpload, type OwnedEvidenceObject } from './evidence-storage.port.js';
 
 export type EvidenceActor = AuthenticatedUser | OperatorSessionContext;
@@ -52,11 +53,12 @@ export class EvidenceService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OperatorSessionService) private readonly sessions: OperatorSessionService,
     @Inject(REPORT_EVIDENCE_AUTHORIZATION) private readonly reports: ReportEvidenceAuthorizationPort,
+    @Inject(EvidenceCleanupService) private readonly cleanup: EvidenceCleanupService,
   ) {}
   async appendCase(context: CaseCommandContext, description: string, files: EvidenceUpload[]): Promise<CaseCommandResult> {
     const input = parseInput(EvidenceSubmitSchema.safeParse({ ...context.input, description }));
     assertCaseKey(context.key);
-    return this.withStored(files, async images => {
+    return this.withStored(files, async (images, owner) => {
       // Actual file digests and their upload sequence participate in replay.
       const commandInput = { ...input, files: images.map(image => image.metadata) };
       return this.commands.run({ ...context, commandName: 'CASE_EVIDENCE_APPENDED', input: commandInput }, async ctx => {
@@ -67,13 +69,14 @@ export class EvidenceService {
           ids.push(row.id);
         }
         await this.records.recordEvidenceInTransaction(ctx, input.description, ids);
+        await this.cleanup.readyInTransaction(ctx.tx, owner);
       });
     });
   }
   async appendReport(actor: AuthenticatedUser, reportId: string, input: ReportEvidenceSubmitInput, files: EvidenceUpload[], key: string): Promise<RiskCommandResult> {
     const normalized = parseInput(ReportEvidenceSubmitSchema.safeParse(input));
     assertCaseKey(key);
-    return this.withStored(files, async images => {
+    return this.withStored(files, async (images, owner) => {
       const identity = { actorId: actor.id, commandName: 'REPORT_EVIDENCE_APPENDED', key };
       const requestHash = canonicalHash({ reportId, input: normalized, files: images.map(image => image.metadata) });
       return caseTransaction(this.prisma, async tx => {
@@ -95,6 +98,7 @@ export class EvidenceService {
         await tx.riskRecord.create({ data: { reportId, actorId: actor.id, targetType: report.targetType, targetId: report.targetId, action: identity.commandName, reason: normalized.description, details: { count: images.length } } });
         await this.audit.record(tx, { actorId: actor.id, action: identity.commandName, entityType: 'RiskReport', entityId: reportId, after: result });
         await tx.idempotencyRecord.create({ data: { ...identity, requestHash, response: result } });
+        await this.cleanup.readyInTransaction(tx, owner);
         return result;
       });
     });
@@ -124,34 +128,24 @@ export class EvidenceService {
   private async assertCount(tx: CaseTx, where: Prisma.CaseEvidenceWhereInput, batchCount: number) {
     if ((await tx.caseEvidence.count({ where })) + batchCount > 30) throw new ConflictException({ code: 'EVIDENCE_LIMIT_EXCEEDED', message: 'A participant may submit at most thirty images per case or report' });
   }
-  private async withStored<T>(files: EvidenceUpload[], use: (images: StoredImage[]) => Promise<T>): Promise<T> {
+  private async withStored<T>(files: EvidenceUpload[], use: (images: StoredImage[], owner: string) => Promise<T>): Promise<T> {
     if (!Array.isArray(files) || files.length < 1 || files.length > 9) throw new BadRequestException('Evidence requires one to nine images');
-    const objects: OwnedEvidenceObject[] = [];
     const images: StoredImage[] = [];
     const owner = randomUUID();
+    const validated = [];
+    for (const file of files) validated.push(await this.validator.validate(file));
+    const objects = validated.flatMap(() => [this.storage.allocate(owner), this.storage.allocate(owner)]);
+    await this.cleanup.begin(owner, objects);
     try {
-      // Decode all files before persisting any object. Saves remain outside the
-      // metadata transaction; only this upload's owned objects can be cleaned.
-      const validated = [];
-      for (const file of files) validated.push(await this.validator.validate(file));
       for (const [index, image] of validated.entries()) {
-        const original = await this.storage.save(owner, files[index].bytes); objects.push(original);
-        const display = await this.storage.save(owner, image.preview); objects.push(display);
+        const originalObject = objects[index * 2];
+        const displayObject = objects[index * 2 + 1];
+        const original = await this.storage.save(originalObject, files[index].bytes, () => this.cleanup.markOwned(owner, originalObject.key));
+        const display = await this.storage.save(displayObject, image.preview, () => this.cleanup.markOwned(owner, displayObject.key));
         images.push({ metadata: image.metadata, original, display });
       }
-      return await use(images);
-    } finally { await this.cleanupOwned(objects); }
-  }
-  // A bounded cleanup task, also used after replay. Never enumerate a storage
-  // directory or remove referenced evidence (including uncertain DB commits).
-  async cleanupOwned(objects: OwnedEvidenceObject[]): Promise<void> {
-    if (objects.length > 18) throw new BadRequestException('Cleanup exceeds one upload ownership scope');
-    if (!objects.length) return;
-    if (new Set(objects.map(object => object.owner)).size !== 1) throw new BadRequestException('Cleanup must belong to one upload owner');
-    const keys = objects.map(object => object.key);
-    const rows = await this.prisma.caseEvidence.findMany({ where: { OR: [{ originalKey: { in: keys } }, { displayKey: { in: keys } }] }, select: { originalKey: true, displayKey: true } });
-    const referenced = new Set(rows.flatMap(row => [row.originalKey, row.displayKey]));
-    for (const object of objects) if (!referenced.has(object.key)) await this.storage.deleteOwned(object);
+      return await use(images, owner);
+    } finally { await this.cleanup.finish(owner); }
   }
 }
 type StoredImage = { metadata: EvidenceImageMetadata; original: OwnedEvidenceObject; display: OwnedEvidenceObject };
