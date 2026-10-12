@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import argon2 from 'argon2';
 import request from 'supertest';
+import { vi } from 'vitest';
+import { AuditService } from '../../../src/audit/audit.service.js';
 import type { AuthenticatedUser } from '../../../src/auth/auth.service.js';
+import type { Prisma } from '../../../src/generated/prisma/client.js';
 import { createOrderHarness } from '../../phase3/support/order-harness.js';
 
 // This wrapper retains the tested OrderHarness ownership and close ordering.
@@ -38,6 +41,19 @@ export async function createAfterSalesHarness() {
     return {
       ...owned, actors: { ...owned.actors, ...additional }, operatorPassword: password,
       operatorLogin, securityCommand,
+      faultAuditActionAfterInsertOnce(action: string, inspectInserted: (tx: Prisma.TransactionClient) => Promise<void>) {
+        const audit = owned.app.get(AuditService); const original = audit.record.bind(audit);
+        let armed = true;
+        vi.spyOn(audit, 'record').mockImplementation(async (tx, entry) => {
+          const inserted = await original(tx, entry);
+          if (armed && entry.action === action) {
+            armed = false;
+            await inspectInserted(tx);
+            throw new Error('Injected action-targeted audit failure after insert');
+          }
+          return inserted;
+        });
+      },
       enrollOwnedDevice: (session: Awaited<ReturnType<typeof operatorLogin>>) => securityCommand(session, 'devices', {}),
       grant: (session: Awaited<ReturnType<typeof operatorLogin>>, input: object) => securityCommand(session, 'grants', { password, ...input }),
       async prepareOrder(options: Parameters<typeof owned.confirmedProposal>[0] = {}) {

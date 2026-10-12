@@ -8,6 +8,7 @@ import { createAfterSalesHarness, type AfterSalesHarness } from './support/after
 import { operatorRequestHash } from '../../src/operator-security/operator-action.types.js';
 import { OutboxWorker } from '../../src/integrations/outbox.worker.js';
 import { OutboxHandlerRegistry } from '../../src/integrations/outbox-handler.registry.js';
+import type { Prisma } from '../../src/generated/prisma/client.js';
 
 let h: AfterSalesHarness;
 beforeAll(async () => { h = await createAfterSalesHarness(); });
@@ -26,6 +27,20 @@ async function operator(actor = h.actors.operations) {
   const session = await h.operatorLogin(actor);
   expect(session.response.status).toBe(201);
   return { session, post: (path: string, input: object, key = randomUUID()) => request(h.app.getHttpServer()).post(path).set('Authorization', `Bearer ${session.token}`).set('Cookie', session.cookie).set('Origin', 'http://localhost:5173').set('Idempotency-Key', key).send(input) };
+}
+let trustedDeviceCookie: string | undefined;
+async function desktopOperator() {
+  if (!trustedDeviceCookie) {
+    const mobile = await operator(h.actors.superAdminOne);
+    const enrollment = await h.enrollOwnedDevice(mobile.session).expect(201);
+    const cli = spawnSync(process.execPath, [resolve('../../node_modules/tsx/dist/cli.mjs'), 'scripts/approve-operator-device.ts', enrollment.body.id, 'Task5 owned adjudication fixture'], { cwd: process.cwd(), env: process.env, encoding: 'utf8', windowsHide: true });
+    expect(cli.status).toBe(0);
+    trustedDeviceCookie = mobile.session.cookie;
+  }
+  const session = await h.operatorLogin(h.actors.superAdminOne, trustedDeviceCookie);
+  expect(session.response.status).toBe(201);
+  expect(session.response.body.operatorSession.capability).toBe('DESKTOP_PRIVILEGED');
+  return session;
 }
 async function storedResolution(f: Awaited<ReturnType<typeof fixture>>) {
   return h.prisma.resolutionVersion.create({ data: { caseId: f.opened.case.id, number: 1, authorId: h.actors.operations.id, type: f.input.type, reason: f.input.reason, rulesVersion: f.input.rulesVersion, evidenceIds: [], itemSnapshotIds: f.input.itemSnapshotIds, responsibility: 'NONE', originalFunds: [], returnPlan: [], compensationComponents: zero(), netCompensationFen: 0, compensationPayer: 'NONE', orderOutcome: 'COMPLETE' } });
@@ -248,11 +263,7 @@ it('shows current proposal details with only current participant consents and no
 });
 it('records an action-bound adjudication atomically without fabricating agreement or execution', async () => {
   const f = await fixture(); const ops = await operator(); const result = (await ops.post(f.path, f.input).expect(200)).body;
-  const mobile = await operator(h.actors.superAdminOne);
-  const enrollment = await h.enrollOwnedDevice(mobile.session).expect(201);
-  const cli = spawnSync(process.execPath, [resolve('../../node_modules/tsx/dist/cli.mjs'), 'scripts/approve-operator-device.ts', enrollment.body.id, 'Task5 owned adjudication fixture'], { cwd: process.cwd(), env: process.env, encoding: 'utf8', windowsHide: true });
-  expect(cli.status).toBe(0);
-  const desktopSession = await h.operatorLogin(h.actors.superAdminOne, mobile.session.cookie);
+  const desktopSession = await desktopOperator();
   const business = { ...versions(result), resolutionVersion: 1, reason: '依据提交说明作平台责任裁决', evidenceIds: [] };
   const grant = await h.grant(desktopSession, { action: 'ADJUDICATE_RESOLUTION', resourceId: f.opened.case.id, expectedVersions: { ...versions(result), resolutionVersion: 1 }, requestHash: operatorRequestHash(business) }).expect(200);
   const input = { ...business, operatorAction: { sessionId: desktopSession.response.body.operatorSession.id, grantId: grant.body.id } };
@@ -277,4 +288,36 @@ it('records an action-bound adjudication atomically without fabricating agreemen
   await h.prisma.userRole.create({ data: { userId: h.actors.superAdminOne.id, role: 'OPERATIONS' } });
   try { await post(input).expect(403); }
   finally { await h.prisma.userRole.delete({ where: { userId_role: { userId: h.actors.superAdminOne.id, role: 'OPERATIONS' } } }); await h.prisma.userRole.create({ data: { userId: h.actors.superAdminOne.id, role: 'SUPER_ADMIN' } }); }
+});
+it('rolls back the final adjudication audit after insertion and retries the same grant and command', async () => {
+  const f = await fixture(); const ops = await operator(); const proposed = (await ops.post(f.path, f.input).expect(200)).body;
+  const desktop = await desktopOperator();
+  const business = { ...versions(proposed), resolutionVersion: 1, reason: '验证裁决最终审计与授权原子提交', evidenceIds: [] };
+  const grant = await h.grant(desktop, { action: 'ADJUDICATE_RESOLUTION', resourceId: f.opened.case.id, expectedVersions: { ...versions(proposed), resolutionVersion: 1 }, requestHash: operatorRequestHash(business) }).expect(200);
+  const input = { ...business, operatorAction: { sessionId: desktop.response.body.operatorSession.id, grantId: grant.body.id } };
+  const key = randomUUID();
+  const post = () => request(h.app.getHttpServer()).post(f.path.replace('/resolutions', '/adjudication')).set('Authorization', `Bearer ${desktop.token}`).set('Cookie', desktop.cookie).set('Origin', 'http://localhost:5173').set('Idempotency-Key', key).send(input);
+  const snapshot = async (tx: Prisma.TransactionClient) => ({
+    case: await tx.afterSalesCase.findUniqueOrThrow({ where: { id: f.opened.case.id }, select: { version: true, status: true, agreementDeadline: true } }),
+    order: await tx.order.findUniqueOrThrow({ where: { id: f.order.id }, select: { version: true, status: true } }),
+    grant: await tx.actionGrant.findUniqueOrThrow({ where: { id: grant.body.id }, select: { consumedAt: true } }),
+    rulings: await tx.caseRecord.count({ where: { caseId: f.opened.case.id, kind: 'RESOLUTION_ADJUDICATED' } }),
+    audits: await tx.auditLog.findMany({ where: { OR: [{ entityId: grant.body.id, action: 'OPERATOR_ACTION_GRANT_CONSUMED' }, { entityId: f.opened.case.id, action: 'CASE_RESOLUTION_ADJUDICATED' }] }, select: { action: true }, orderBy: { action: 'asc' } }),
+    results: await tx.idempotencyRecord.count({ where: { actorId: h.actors.superAdminOne.id, commandName: 'CASE_RESOLUTION_ADJUDICATED', key } }),
+  });
+  const before = await snapshot(h.prisma);
+  expect(before).toEqual({ case: { version: 2, status: 'AWAITING_AGREEMENT', agreementDeadline: new Date('2026-10-12T00:00:00.000Z') }, order: { version: 3, status: 'ON_HOLD' }, grant: { consumedAt: null }, rulings: 0, audits: [], results: 0 });
+  let inserted: Awaited<ReturnType<typeof snapshot>> | undefined;
+  h.faultAuditActionAfterInsertOnce('CASE_RESOLUTION_ADJUDICATED', async tx => { inserted = await snapshot(tx); });
+  await post().expect(500);
+  // Read the real transaction before the injected throw: the first audit succeeded,
+  // the ruling and both version changes exist, and the final audit was inserted.
+  const committedFacts = { case: { version: 3, status: 'UNDER_REVIEW', agreementDeadline: null }, order: { version: 4, status: 'ON_HOLD' }, grant: { consumedAt: h.clock.now() }, rulings: 1, audits: [{ action: 'CASE_RESOLUTION_ADJUDICATED' }, { action: 'OPERATOR_ACTION_GRANT_CONSUMED' }], results: 1 };
+  expect(inserted).toEqual({ ...committedFacts, results: 0 });
+  expect(await snapshot(h.prisma)).toEqual(before);
+  const retried = await post().expect(200);
+  expect(retried.body).toMatchObject({ case: { version: 3, status: 'UNDER_REVIEW' }, orderVersion: 4 });
+  expect(await snapshot(h.prisma)).toEqual(committedFacts);
+  expect((await post().expect(200)).body).toEqual(retried.body);
+  expect(await snapshot(h.prisma)).toEqual(committedFacts);
 });
