@@ -111,11 +111,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `EvidenceUpload = {bytes:Buffer;contentType:string}`；`EvidenceService.appendCase(context, description, files: EvidenceUpload[]): Promise<CaseCommandResult>`；`appendReport(actor, reportId, input, files, key): Promise<RiskCommandResult>`；`read(actor, evidenceId, variant: 'preview'|'original'): Promise<{bytes:Buffer;contentType:string}>`。`EvidenceStoragePort.save/read/deleteOwned` 使用不透明键，不产生公开 URL。report 授权接口先定义，Task 7 接通。
 
-- [ ] **Step 1: 写失败测试。** 外人/无售后权限运营读404或403，客户不能读他人举报证据；9张通过、10张拒绝、累计31张拒绝；畸形JPEG/超像素/MIME伪造拒绝；展示无EXIF、原件摘要不变；原件下载审计失败不返回字节；无授权公开 URL 不可用。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/evidence.e2e-spec.ts`，图片解码测试须真实字节而非仅测试 mock。
-- [ ] **Step 3: 实现附件。** multipart 1～9张，正文与版本严格验证，幂等摘要包含文件内容摘要及次序。使用经过核对官方文档的 sharp 解码/像素限制与去元数据预览，保留原件；单批元数据与计数锁、审计同事务。新增依赖按实际锁定版本配置需要的 npm allowScripts，不升级整个技术栈。文件先写私有对象，失败对象标识有限范围清理；原件/预览响应 Cache-Control:no-store，下载逐次鉴权。缺生产私有存储明确503。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、验证器测试以及原公开物品图片上传回归；断言私有证据从公开文件路由无法读取。
-- [ ] **Step 5: 审查与提交。** `feat: add private immutable after-sales evidence`。
+- [x] **Step 1: 写失败测试。** 外人/无售后权限运营读404或403，客户不能读他人举报证据；9张通过、10张拒绝、累计31张拒绝；畸形JPEG/超像素/MIME伪造拒绝；展示无EXIF、原件摘要不变；原件下载审计失败不返回字节；无授权公开 URL 不可用。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/evidence.e2e-spec.ts`，图片解码测试须真实字节而非仅测试 mock。
+- [x] **Step 3: 实现附件。** multipart 1～9张，正文与版本严格验证，幂等摘要包含文件内容摘要及次序。使用经过核对官方文档的 sharp 解码/像素限制与去元数据预览，保留原件；单批元数据与计数锁、审计同事务。新增依赖按实际锁定版本配置需要的 npm allowScripts，不升级整个技术栈。文件先写私有对象，失败对象标识有限范围清理；原件/预览响应 Cache-Control:no-store，下载逐次鉴权。缺生产私有存储明确503。
+- [x] **Step 4: GREEN。** 重跑 Step 2、验证器测试以及原公开物品图片上传回归；断言私有证据从公开文件路由无法读取。
+- [x] **Step 5: 审查与提交。** `feat: add private immutable after-sales evidence`。
 
 ### Task 5: 不可修改方案、客户确认与裁决记录
 
@@ -123,7 +123,7 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `ResolutionService.propose(operator, caseId, input, key): Promise<CaseCommandResult>`、`consent(context, input): Promise<CaseCommandResult>`、`adjudicate(operatorContext, input, key): Promise<CaseCommandResult>`；`resolveCompensation(input, originalDifferenceFen): NetCompensation`（Task 1类型），每项明示方向和非负金额，净额服务端推导。
 
-- [ ] **Step 1: 写失败测试。** 新版本使旧双方确认失效；两方仅自己确认；起草方案不代表用户验收；额外/运费20001拒绝、总净额60001拒绝，净零payer=NONE。EXECUTING 禁止直接换方案，终态订单方案不能倒退状态。
+- [ ] **Step 1: 写失败测试。** 新版本使旧双方确认失效；两方仅自己确认；起草方案不代表用户验收；额外/运费20001拒绝、总净额60001拒绝，净零payer=NONE。EXECUTING 禁止直接换方案，终态订单方案不能倒退状态。必须回归修复 Task1 审查发现的数据库约束：REJECT 的理由不能接受 SQL NULL；通过真实 PostgreSQL 失败测试确认旧缺陷，再加新迁移约束并验证审计/裁决仍不可修改。
 - [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/resolutions.e2e-spec.ts`。
 - [ ] **Step 3: 实现五类方案。** OPEN 可直接进入 UNDER_REVIEW 后起草，无需虚构补证。校验物品快照属于该订单；每个原款目标由服务端计划推导，禁止任意收款账号和业务号。客服可起草/补证，风控不能越权裁决资金；裁决保存证据与理由，不虚构同意。执行入口在 Task 6 授权后接通，之前明确不能执行，不提交假成功。
 - [ ] **Step 4: GREEN。** 重跑 Step 2；验证方案、确认、记录不可修改触发器与新版本冲突。
@@ -257,7 +257,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～3 已完成，Tasks 4～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～4 已完成，Tasks 5～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
 
 ### Task 1 实际结果
 
@@ -287,3 +287,12 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - 两项独立审查发现Important：非空导入历史零链尾误建新根；同根补偿/退货待核验事件未阻关闭。修正新增8类异常历史及33类外部事实测试，均先观察真实失败。最终三文件75项、API lint/typecheck通过；两位新的独立scoped复查均确认已处理、无新增阻断问题。
 - 所有测试迁移及清理限自有临时库，源库计数/迁移记录不变、临时库普通清理并核验catalog，不宣称逐行源数据一致。没有新迁移、schema/依赖变更、真实业务或推送。Git行尾提示保留记录；短暂模型容量错误恢复后接续原测试，未重复启动。
 - 后续门槛：Task5接真实方案拒绝，Task8/9/10证明归还/资金完成事实写入及同订单锁协议，Task11接通共享请求/定时过期。当前只读这些事实，不伪造执行；交易冻结本身不阻断必要售后，具体风险关联留Task7。
+
+### Task 4 实际结果（2026-10-12）
+
+- 提交：`3ab1705`（私有证据上传与读取）；`2fd5c26`（审查修复所需的有界、可恢复清理契约）；`babe6a6`（持久化并发回收任务、所有权围栏及失败保留）。最终审查记录：`8893897` 为本任务 BASE，修复范围 `3ab1705..babe6a6`。
+- 图片采用 sharp 0.35.5 解码；私有原件与去元数据预览无公开 URL，逐次检查当前身份/权限，原件审计与读取受控。实际图片字节和 PostgreSQL 元数据测试覆盖限额、越权、重放、回滚、私有存储缺失时503；该环境没有生产对象存储适配器。
+- 修复前真实 RED：部分字节写入后 EIO 留下文件；首次删除错误导致 HTTP 409 被覆盖成500且停止后续清理；引用查询失败导致已提交 HTTP 200 被覆盖成500。修复加入仅新增迁移 `20261012160000_private_evidence_cleanup_jobs`：先持久登记最多18个对象，独占创建后、写字节前确认所有权；元数据事务与READY围栏同事务；引用查询/逐项删除错误保留可恢复描述符且不覆盖原业务结果。OPEN 任务不按时间清理，只有原实例确认请求结束或同主机记录进程明确不存在才恢复；无法证明的对象留待核验。
+- 修复后专项：清理/证据测试25项通过，证据单测及旧公开上传回归24项通过，共享契约17项通过，API lint/typecheck通过。候选 `3ab1705` 的全仓 npm test 为809项通过；此全仓结果属于修复前候选，不作为 `babe6a6` 的全仓验证。本任务修复后没有重跑全仓套件，阶段末六项门槛仍待执行。
+- 独立规范复审通过，确认原有重要问题均修正、无新增问题。独立质量复审批准并记录一项非阻断 Minor：其他实例删除READY任务后，原实例的进程内 `ended` 集合可能留有无用UUID；不影响持久回收或业务结果，交由最终整分支审查处理。原两项Important（部分写入归属丢失、清理失败覆盖业务结果/遗失后续对象）均有真实失败复现和修复后测试证据。
+- 迁移只新增清理任务表，没有改写既有迁移。测试证明限定源库表计数/迁移记录及临时归属库清理，不宣称源数据逐行相等；仅使用私有本地临时PostgreSQL，未用SQLite或真实外部服务。
