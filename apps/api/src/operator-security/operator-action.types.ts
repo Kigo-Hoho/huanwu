@@ -15,7 +15,7 @@ export function operatorRequestHash(input: Record<string, unknown>): string {
   return canonicalHash(Object.fromEntries(Object.entries(input).filter(([key]) => !['password', 'grantId', 'sessionId', 'operatorAction', 'operatorActionContext'].includes(key))));
 }
 export function actionCapability(action: OperatorAction): OperatorCapability {
-  return ['UNFREEZE_TRADING', 'APPROVE_FUNDS', 'EXECUTE_FUNDS', 'RESUME_ORDER', 'APPROVE_DEVICE', 'REVOKE_DEVICE'].includes(action) ? 'DESKTOP_PRIVILEGED' : 'MOBILE_LIMITED';
+  return ['UNFREEZE_TRADING', 'APPROVE_FUNDS', 'EXECUTE_FUNDS', 'ADJUDICATE_RESOLUTION', 'RESUME_ORDER', 'APPROVE_DEVICE', 'REVOKE_DEVICE'].includes(action) ? 'DESKTOP_PRIVILEGED' : 'MOBILE_LIMITED';
 }
 export function assertActionRole(actor: AuthenticatedUser, action: OperatorAction): void {
   const riskAction = ['FREEZE_TRADING', 'UNFREEZE_TRADING', 'UNPUBLISH_ITEM', 'HOLD_ORDER'].includes(action);

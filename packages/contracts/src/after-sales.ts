@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { AdminEvidenceViewSchema, EvidenceViewSchema } from './evidence.js';
-import { OrderSideSchema } from './orders.js';
+import { OrderSideSchema, OrderStatusSchema, PaymentPurposeSchema, PaymentStatusSchema } from './orders.js';
 import { ProposalPayerSchema } from './proposals.js';
+import { OperatorActionContextSchema } from './operator-security.js';
 
 const uuid = z.string().uuid().toLowerCase();
 const version = z.number().int().positive();
@@ -24,6 +25,7 @@ export const CaseEvidenceRequestSchema = z.strictObject({ ...CaseCommandSchema.s
 export const CaseRejectSchema = z.strictObject({ ...CaseCommandSchema.shape, reason: text(1, 2000) });
 export const ResolutionConsentSchema = z.strictObject({ ...ResolutionCommandSchema.shape, decision: ResolutionDecisionSchema, reason: text(1, 2000).optional() })
   .refine(v => v.decision !== 'REJECT' || Boolean(v.reason), 'Rejection requires a reason');
+export const ResolutionAdjudicationSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), evidenceIds: z.array(uuid).max(60).refine(distinct), operatorAction: OperatorActionContextSchema });
 export const NetCompensationSchema = z.strictObject({ amountFen: z.number().int().min(0).max(60000), payer: ProposalPayerSchema })
   .refine(v => v.amountFen === 0 ? v.payer === 'NONE' : v.payer !== 'NONE', 'Zero compensation requires NONE; positive compensation requires a payer');
 export const CompensationComponentsSchema = z.strictObject({
@@ -58,6 +60,23 @@ export const CaseViewSchema = z.strictObject({
   reason: text(1, 2000), currentResolutionVersion: version.nullable(), responseDeadline: time.nullable(), agreementDeadline: time.nullable(),
   createdAt: time, updatedAt: time,
 });
+const resolutionFields = {
+  id: uuid, number: version, type: ResolutionTypeSchema, reason: text(1, 2000), rulesVersion: text(1, 100),
+  evidenceIds: z.array(uuid), itemSnapshotIds: z.array(uuid), responsibility: ResolutionResponsibilitySchema,
+  originalFunds: OriginalFundsPlanSchema, returnPlan: ResolutionReturnPlanSchema,
+  compensationComponents: CompensationComponentsSchema, netCompensation: NetCompensationSchema,
+  orderOutcome: ResolutionOrderOutcomeSchema, createdAt: time,
+  consents: z.array(z.strictObject({ side: OrderSideSchema, decision: ResolutionDecisionSchema, reason: text(1, 2000).nullable(), createdAt: time })),
+};
+export const ResolutionViewSchema = z.strictObject(resolutionFields);
+// Deliberate allowlist, independent of future customer-only view additions.
+export const AdminResolutionViewSchema = z.strictObject({ ...resolutionFields });
+export const AdminResolutionContextSchema = z.strictObject({
+  orderStatus: OrderStatusSchema, orderVersion: version,
+  itemSnapshots: z.array(z.strictObject({ id: uuid, itemId: uuid, side: OrderSideSchema, deliveryState: z.enum(['UNDELIVERED', 'REGISTERED', 'COLLECTED', 'DELIVERED', 'EXCEPTION', 'HANDED_OVER']) })).max(6),
+  originalPayments: z.array(z.strictObject({ paymentIntentId: uuid, side: OrderSideSchema, purpose: PaymentPurposeSchema, status: PaymentStatusSchema, amountFen: z.number().int().positive(), collectedFen: z.number().int().nonnegative(), refundedFen: z.number().int().nonnegative(), settledFen: z.number().int().nonnegative() })).max(3),
+  originalDifference: z.strictObject({ amountFen: z.number().int().min(0).max(20000), payer: ProposalPayerSchema, settlementStatus: z.enum(['UNPAID', 'PAID', 'SETTLED', 'REFUNDED', 'UNKNOWN']) }),
+});
 // Keep the management projection explicit: later participant-only fields must
 // never become visible to operators by extending the customer schema.
 export const AdminCaseViewSchema = z.strictObject({
@@ -71,8 +90,8 @@ export const CaseCommandResultSchema = z.strictObject({ case: CaseViewSchema, or
 export const AdminCaseCommandResultSchema = z.strictObject({ case: AdminCaseViewSchema, orderVersion: version });
 export const CaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
 export const AdminCaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
-export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema), evidence: z.array(EvidenceViewSchema).default([]) });
-export const AdminCaseDetailViewSchema = z.strictObject({ ...AdminCaseViewSchema.shape, records: z.array(AdminCaseRecordViewSchema), evidence: z.array(AdminEvidenceViewSchema).default([]) });
+export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema), evidence: z.array(EvidenceViewSchema).default([]), resolutions: z.array(ResolutionViewSchema).default([]) });
+export const AdminCaseDetailViewSchema = z.strictObject({ ...AdminCaseViewSchema.shape, records: z.array(AdminCaseRecordViewSchema), evidence: z.array(AdminEvidenceViewSchema).default([]), resolutions: z.array(AdminResolutionViewSchema).default([]), resolutionContext: AdminResolutionContextSchema.optional() });
 export const AdminCaseListViewSchema = z.strictObject({ items: z.array(AdminCaseViewSchema), nextCursor: z.string().nullable() });
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 export type ResolutionType = z.infer<typeof ResolutionTypeSchema>;
@@ -91,6 +110,7 @@ export type CaseWithdrawalResponseInput = z.infer<typeof CaseWithdrawalResponseS
 export type CaseEvidenceRequestInput = z.infer<typeof CaseEvidenceRequestSchema>;
 export type CaseRejectInput = z.infer<typeof CaseRejectSchema>;
 export type ResolutionConsentInput = z.infer<typeof ResolutionConsentSchema>;
+export type ResolutionAdjudicationInput = z.infer<typeof ResolutionAdjudicationSchema>;
 export type ResolutionInput = z.infer<typeof ResolutionInputSchema>;
 export type NetCompensation = z.infer<typeof NetCompensationSchema>;
 export type CompensationComponents = z.infer<typeof CompensationComponentsSchema>;

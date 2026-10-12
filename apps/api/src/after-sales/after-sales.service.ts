@@ -12,7 +12,7 @@ import { assertOrderParticipant } from '../orders/order-commands.service.js';
 import { OrderHoldService } from '../orders/order-hold.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { assertCaseKey, caseTransaction, replayCaseCommand } from './case-commands.service.js';
-import { mapAdminCase, mapAdminCaseEvidence, mapAdminCaseRecord, mapCase, mapCaseEvidence, mapCaseRecord } from './case.mapper.js';
+import { mapAdminCase, mapAdminCaseEvidence, mapAdminCaseRecord, mapAdminResolution, mapAdminResolutionContext, mapCase, mapCaseEvidence, mapCaseRecord, mapResolution } from './case.mapper.js';
 import { assertCaseEligibility, assertCaseOperator, assertCaseParticipant, assertCurrentCustomer } from './case-policy.js';
 import { readCase } from './case-reader.js';
 
@@ -111,7 +111,7 @@ export class AfterSalesService {
       const value = await readCase(tx, id);
       const order = value ? await readOrder(tx, value.orderId) : null;
       assertCaseParticipant(order, value, actor.id);
-      return CaseDetailViewSchema.parse({ ...mapCase(value), records: value.records.map(record => mapCaseRecord(record, order!)), evidence: value.evidence.map(mapCaseEvidence) });
+      return CaseDetailViewSchema.parse({ ...mapCase(value), records: value.records.map(record => mapCaseRecord(record, order!)), evidence: value.evidence.map(mapCaseEvidence), resolutions: value.resolutions.map(mapResolution) });
     }, { isolationLevel: 'RepeatableRead' });
   }
   async adminDetail(context: OperatorSessionContext, id: string) {
@@ -121,7 +121,8 @@ export class AfterSalesService {
       const value = await readCase(tx, id);
       const order = value ? await readOrder(tx, value.orderId) : null;
       if (!value || !order) throw new NotFoundException({ code: 'AFTER_SALES_NOT_FOUND', message: 'After-sales case was not found' });
-      return AdminCaseDetailViewSchema.parse({ ...mapAdminCase(value), records: value.records.map(record => mapAdminCaseRecord(record, order)), evidence: value.evidence.map(mapAdminCaseEvidence) });
+      const entries = await tx.financialEntry.findMany({ where: { intent: { orderId: order.id } } });
+      return AdminCaseDetailViewSchema.parse({ ...mapAdminCase(value), records: value.records.map(record => mapAdminCaseRecord(record, order)), evidence: value.evidence.map(mapAdminCaseEvidence), resolutions: value.resolutions.map(mapAdminResolution), resolutionContext: mapAdminResolutionContext(order, entries) });
     }, { isolationLevel: 'RepeatableRead' });
   }
   async list(actor: AuthenticatedUser, query: CaseListQuery) {

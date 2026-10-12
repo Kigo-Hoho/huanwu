@@ -1,10 +1,10 @@
-import { AdminCaseCommandResultSchema, CaseCommandResultSchema, ProposalIdempotencyKeySchema, type CaseCommandResult } from '@barter/contracts';
+import { AdminCaseCommandResultSchema, CaseCommandResultSchema, ProposalIdempotencyKeySchema, type CaseCommandResult, type OperatorAction } from '@barter/contracts';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
-import { canonicalHash, type OperatorSessionContext } from '../operator-security/operator-action.types.js';
+import { actionCapability, assertActionRole, canonicalHash, type OperatorSessionContext } from '../operator-security/operator-action.types.js';
 import { OperatorSessionService } from '../operator-security/operator-session.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { mapAdminCase, mapCase } from './case.mapper.js';
@@ -12,7 +12,7 @@ import { assertCaseOperator, assertCaseParticipant, assertCurrentCustomer, asser
 import { readCase } from './case-reader.js';
 import type { CaseCommandContext, CaseMutationContext, CaseTx } from './case.types.js';
 
-export interface OperatorCaseCommandContext extends CaseCommandContext { operatorSession: OperatorSessionContext }
+export interface OperatorCaseCommandContext extends CaseCommandContext { operatorSession: OperatorSessionContext; requiredAction?: OperatorAction }
 export function assertCaseKey(key: string): void {
   if (!ProposalIdempotencyKeySchema.safeParse(key).success) throw new BadRequestException('A valid Idempotency-Key is required');
 }
@@ -50,8 +50,9 @@ export class CaseCommandsService {
     if (!located) throw new NotFoundException({ code: 'AFTER_SALES_NOT_FOUND', message: 'After-sales case was not found' });
     return caseTransaction(this.prisma, async tx => {
       if ('operatorSession' in context) {
-        await this.sessions.assertCurrent(tx, context.operatorSession, 'MOBILE_LIMITED');
+        await this.sessions.assertCurrent(tx, context.operatorSession, context.requiredAction ? actionCapability(context.requiredAction) : 'MOBILE_LIMITED');
         assertCaseOperator(context.operatorSession.actor);
+        if (context.requiredAction) assertActionRole(context.operatorSession.actor, context.requiredAction);
         if (context.actor.id !== context.operatorSession.actor.id) throw new ForbiddenException('Command actor differs from its operator session');
       } else await assertCurrentCustomer(tx, context.actor);
       await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${located.orderId}::uuid FOR UPDATE`;

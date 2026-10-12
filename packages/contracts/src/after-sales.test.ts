@@ -68,3 +68,17 @@ it('keeps management case, record, detail and command projections strictly redac
     expect(schema('AdminCaseCommandResultSchema').safeParse({ case: { ...view, [privateField]: 'private' }, orderVersion: 2 }).success).toBe(false);
   }
 });
+it('strictly allowlists the operator draft context without exposing private integration data', () => {
+  const value = {
+    orderStatus: 'ON_HOLD', orderVersion: 2,
+    itemSnapshots: [{ id, itemId: id, side: 'INITIATOR', deliveryState: 'REGISTERED' }],
+    originalPayments: [{ paymentIntentId: id, side: 'INITIATOR', purpose: 'DEPOSIT', status: 'PAID', amountFen: 1000, collectedFen: 1000, refundedFen: 0, settledFen: 0 }],
+    originalDifference: { amountFen: 0, payer: 'NONE', settlementStatus: 'UNPAID' },
+  };
+  const context = schema('AdminResolutionContextSchema');
+  expect(context.safeParse(value).success).toBe(true);
+  for (const privateField of ['businessNo', 'account', 'checkout', 'address', 'providerResult']) {
+    expect(context.safeParse({ ...value, [privateField]: 'private' }).success).toBe(false);
+    expect(context.safeParse({ ...value, originalPayments: [{ ...value.originalPayments[0], [privateField]: 'private' }] }).success).toBe(false);
+  }
+});

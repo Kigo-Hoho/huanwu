@@ -1,6 +1,7 @@
 import {
   CaseEvidenceRequestSchema, CaseListQuerySchema, CaseRejectSchema, CaseResponseSchema,
   CaseWithdrawalResponseSchema, CaseWithdrawalSchema, CreateCaseSchema,
+  ResolutionConsentSchema, type ResolutionConsentInput,
   type CaseEvidenceRequestInput, type CaseListQuery, type CaseRejectInput,
   type CaseResponseInput, type CaseWithdrawalInput, type CaseWithdrawalResponseInput, type CreateCaseInput,
 } from '@barter/contracts';
@@ -16,6 +17,7 @@ import { requireOperatorSession } from '../operator-security/operator-security.c
 import { assertOperatorOrigin } from '../operator-security/operator-session.service.js';
 import { AfterSalesService } from './after-sales.service.js';
 import { CaseRecordsService } from './case-records.service.js';
+import { ResolutionService } from './resolution.service.js';
 
 @Controller()
 @UseGuards(JwtAuthGuard, CustomerOnlyGuard)
@@ -23,6 +25,7 @@ export class AfterSalesController {
   constructor(
     @Inject(AfterSalesService) private readonly cases: AfterSalesService,
     @Inject(CaseRecordsService) private readonly records: CaseRecordsService,
+    @Inject(ResolutionService) private readonly resolutions: ResolutionService,
   ) {}
   @Post('orders/:id/after-sales')
   open(
@@ -48,6 +51,14 @@ export class AfterSalesController {
     @Body(new ZodValidationPipe(CaseResponseSchema)) input: CaseResponseInput,
     @Headers('idempotency-key') key: string, @Headers('x-request-id') requestId?: string,
   ) { return this.records.respond({ actor, caseId: id.toLowerCase(), input, key, requestId, commandName: 'CASE_RESPONSE_RECORDED' }, input); }
+
+  @Post('after-sales/:id/consent')
+  @HttpCode(200)
+  consent(
+    @CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(ResolutionConsentSchema)) input: ResolutionConsentInput,
+    @Headers('idempotency-key') key: string, @Headers('x-request-id') requestId?: string,
+  ) { return this.resolutions.consent({ actor, caseId: id.toLowerCase(), input, key, requestId, commandName: 'CASE_RESOLUTION_CONSENT' }, input); }
 
   @Post('after-sales/:id/withdraw')
   @HttpCode(200)
