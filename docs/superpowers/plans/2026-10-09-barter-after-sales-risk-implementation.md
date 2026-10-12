@@ -105,7 +105,9 @@ it('pins the inclusive net compensation ceiling', () => {
 
 ### Task 4: 私有证据上传、展示与原件审计
 
-**Files:** Create `apps/api/src/evidence/{evidence.module,evidence.controller,evidence.service,evidence-storage.port,local-private-evidence.adapter,evidence-image-validator}.ts`；Modify API package.json/lock（必要的图片解码依赖）、CaseRecordsService；Test `apps/api/test/phase4/evidence.e2e-spec.ts`、图片验证单元测试。
+**Files:** Create `apps/api/src/evidence/{evidence.module,evidence.controller,evidence.service,evidence-storage.port,local-private-evidence.adapter,evidence-image-validator,evidence-cleanup.service}.ts`；Modify API package.json/lock（必要的图片解码依赖）、CaseRecordsService；追加 Prisma `EvidenceCleanupJob` 模型及新迁移（不修改已应用迁移）；Test `apps/api/test/phase4/evidence.e2e-spec.ts`、图片验证及清理故障测试。
+
+审查兼容修正（2026-10-12）：文件部分写入和回收自身失败时，仅请求 finally 清理会丢失归属并覆盖业务结果。单次上传最多18个对象描述符在写入前持久登记；元数据成功事务同步结束登记，独立有界回收逐项查引用，失败保留重试且不改变原业务结果。OPEN 不按时间自动删除，仅在同主机/存储归属、确定上传已结束或原进程已退出时恢复；无法确定则保留人工核验。该内部清理补充满足原私有孤立对象要求，不提供生产本地存储回退或新的交易业务。
 
 **Interfaces:** Produces `EvidenceUpload = {bytes:Buffer;contentType:string}`；`EvidenceService.appendCase(context, description, files: EvidenceUpload[]): Promise<CaseCommandResult>`；`appendReport(actor, reportId, input, files, key): Promise<RiskCommandResult>`；`read(actor, evidenceId, variant: 'preview'|'original'): Promise<{bytes:Buffer;contentType:string}>`。`EvidenceStoragePort.save/read/deleteOwned` 使用不透明键，不产生公开 URL。report 授权接口先定义，Task 7 接通。
 
