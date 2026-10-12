@@ -5,7 +5,7 @@ import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { PrismaService } from '../database/prisma.service.js';
-import type { Prisma } from '../generated/prisma/client.js';
+import type { AfterSalesCase, Prisma } from '../generated/prisma/client.js';
 import { canonicalHash, type OperatorSessionContext } from '../operator-security/operator-action.types.js';
 import { OperatorSessionService } from '../operator-security/operator-session.service.js';
 import { assertOrderParticipant } from '../orders/order-commands.service.js';
@@ -26,6 +26,42 @@ function pageBoundary(cursor?: string): Prisma.AfterSalesCaseWhereInput {
     const createdAt = new Date(value.createdAt);
     return { OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: value.id } }] };
   } catch { throw new BadRequestException({ code: 'VALIDATION_FAILED', message: 'Invalid after-sales cursor' }); }
+}
+function casePredecessor(history: AfterSalesCase[], associations: { caseId: string; details: Prisma.JsonValue | null }[]): AfterSalesCase | undefined {
+  if (history.length === 0) return undefined;
+  const invalid = () => {
+    throw new ConflictException({ code: 'AFTER_SALES_NOT_ELIGIBLE', message: 'Ambiguous closed-case history requires manual verification', manualVerificationRequired: true });
+  };
+  const cases = new Map(history.map(value => [value.id, value]));
+  if (new Set(history.map(value => value.rootDisputeId)).size !== 1) invalid();
+  const parents = new Map<string, string>();
+  const opened = new Set<string>();
+  for (const record of associations) {
+    if (opened.has(record.caseId)) invalid();
+    opened.add(record.caseId);
+    if (record.details === null) continue;
+    if (typeof record.details !== 'object' || Array.isArray(record.details)) invalid();
+    const details = record.details as Prisma.JsonObject;
+    if (!Object.hasOwn(details, 'previousCaseId')) continue;
+    const id = z.string().uuid().toLowerCase().safeParse(details.previousCaseId);
+    if (!id.success || !cases.has(id.data)) invalid();
+    const parentId = id.data!;
+    if (Object.hasOwn(details, 'previousOutcome') && details.previousOutcome !== cases.get(parentId)!.status) invalid();
+    parents.set(record.caseId, parentId);
+  }
+  const superseded = new Set(parents.values());
+  const tails = history.filter(value => !superseded.has(value.id));
+  if (tails.length !== 1) invalid();
+  const visited = new Set<string>();
+  let id: string | undefined = tails[0]!.id;
+  while (id !== undefined) {
+    if (visited.has(id)) invalid();
+    visited.add(id);
+    id = parents.get(id);
+  }
+  // One apparent tail is insufficient if a disconnected cycle/chain is omitted.
+  if (visited.size !== history.length) invalid();
+  return tails[0];
 }
 @Injectable()
 export class AfterSalesService {
@@ -53,11 +89,8 @@ export class AfterSalesService {
       const now = this.clock.now();
       await assertCaseEligibility(tx, order, now);
       const history = await tx.afterSalesCase.findMany({ where: { orderId } });
-      const associations = await tx.caseRecord.findMany({ where: { case: { orderId }, kind: 'OPENED' }, select: { details: true } });
-      const superseded = new Set(associations.map(record => (record.details as Prisma.JsonObject | null)?.previousCaseId));
-      const candidates = history.filter(previous => !superseded.has(previous.id));
-      if (candidates.length > 1) throw new ConflictException({ code: 'AFTER_SALES_NOT_ELIGIBLE', message: 'Ambiguous closed-case history requires manual verification', manualVerificationRequired: true });
-      const latest = candidates[0];
+      const associations = await tx.caseRecord.findMany({ where: { case: { orderId }, kind: 'OPENED' }, select: { caseId: true, details: true } });
+      const latest = casePredecessor(history, associations);
       if (input.previousCaseId && latest?.id !== input.previousCaseId) throw new ConflictException({ code: 'AFTER_SALES_NOT_ELIGIBLE', message: 'Successor must reference the latest closed case on this order' });
       const value = await tx.afterSalesCase.create({ data: { orderId, applicantId: actor.id, reason: input.reason, ...(latest ? { rootDisputeId: latest.rootDisputeId } : {}), createdAt: now } });
       await tx.caseRecord.create({ data: { caseId: value.id, actorId: actor.id, kind: 'OPENED', description: input.reason, details: latest ? { previousCaseId: latest.id, previousOutcome: latest.status } : undefined, createdAt: now } });

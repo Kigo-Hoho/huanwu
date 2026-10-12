@@ -66,17 +66,39 @@ export async function assertSafeCaseClosure(tx: CaseTx, order: LockedOrder, valu
   if (liveRisk || blockers || order.shipments.some(s => s.status === 'EXCEPTION')) {
     throw new ConflictException({ code: 'RISK_BLOCKS_RESUME', message: 'Active risk prevents case closure; withdrawal request remains recorded' });
   }
-  const pendingCommands = await tx.outboxCommand.count({ where: { orderId: order.id, status: { not: 'SUCCEEDED' } } });
+  const commands = await tx.outboxCommand.findMany({ where: { orderId: order.id }, select: { businessNo: true, status: true, payload: true } });
+  const pendingCommands = commands.some(command => command.status !== 'SUCCEEDED');
   const payments = await tx.paymentIntent.findMany({ where: { orderId: order.id } });
-  const businessNos = [...payments.flatMap(p => [p.businessNo, `refund:${p.id}`, `settle:${p.id}`, `close:${p.id}`]), ...order.shipments.map(s => s.businessNo)];
-  const pendingFacts = businessNos.length ? await tx.integrationEvent.count({ where: { businessNo: { in: businessNos }, OR: [{ receipt: null }, { receipt: { status: { not: 'PROCESSED' } } }] } }) : 0;
+  const sameDispute = { resolution: { case: { rootDisputeId: value.rootDisputeId } } };
+  const compensationPayments = await tx.compensationPayment.findMany({ where: { obligation: sameDispute }, select: { id: true, businessNo: true } });
+  const returnShipments = await tx.returnShipment.findMany({ where: sameDispute, select: { id: true, businessNo: true } });
+  const compensationEntries = await tx.compensationFinancialEntry.findMany({ where: { payment: { obligation: sameDispute } }, select: { businessNo: true } });
+  const businessNos = new Set([
+    ...payments.flatMap(payment => [payment.businessNo, `refund:${payment.id}`, `settle:${payment.id}`, `close:${payment.id}`]),
+    ...order.shipments.map(shipment => shipment.businessNo),
+    ...returnShipments.map(shipment => shipment.businessNo),
+    ...compensationEntries.map(entry => entry.businessNo),
+    // Approved Task9 identities also protect facts arriving before their first
+    // outbox/ledger association; do not create any operation to resolve them.
+    ...compensationPayments.flatMap(payment => [payment.businessNo, `compensation:payment:${payment.id}`, `compensation:refund:${payment.id}`, `compensation:disburse:${payment.id}`]),
+  ]);
+  const shipmentIds = new Set([...order.shipments.map(shipment => shipment.id), ...returnShipments.map(shipment => shipment.id)]);
+  for (const command of commands) {
+    const payload = command.payload;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) continue;
+    if ((typeof payload.paymentBusinessNo === 'string' && businessNos.has(payload.paymentBusinessNo))
+      || (typeof payload.shipmentBusinessNo === 'string' && businessNos.has(payload.shipmentBusinessNo))
+      || (typeof payload.shipmentId === 'string' && shipmentIds.has(payload.shipmentId))) {
+      businessNos.add(command.businessNo);
+    }
+  }
+  const pendingFacts = businessNos.size ? await tx.integrationEvent.count({ where: { businessNo: { in: [...businessNos] }, OR: [{ receipt: null }, { receipt: { status: { not: 'PROCESSED' } } }] } }) : 0;
   if (pendingCommands || pendingFacts || order.payments.some(p => p.status === 'UNKNOWN')) {
     throw new ConflictException({ code: 'FUNDS_UNRESOLVED', message: 'External instructions or facts require verification before closure' });
   }
   // Read completion markers from the owning domains. Missing/unknown progress
   // requires their later reconciliation workflow; this command never writes
   // execution, return or money completion on their behalf.
-  const sameDispute = { resolution: { case: { rootDisputeId: value.rootDisputeId } } };
   const executions = await tx.resolutionExecution.findMany({ where: sameDispute, include: { progress: true } });
   const returns = await tx.returnObligation.findMany({ where: sameDispute, include: { progress: true } });
   let pending = value.status === 'EXECUTING'

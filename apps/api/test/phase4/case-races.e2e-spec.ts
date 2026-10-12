@@ -57,3 +57,38 @@ it('rolls back a response record and both revisions when its final audit fails',
   expect(await h.prisma.auditLog.count()).toBe(auditCount);
   expect(await h.prisma.idempotencyRecord.count({ where: { key } })).toBe(0);
 });
+it.each(['self-cycle', 'mutual-cycle', 'cycle-with-tail', 'dangling-reference', 'inconsistent-root', 'duplicate-parent', 'malformed-reference', 'multiple-tails'] as const)('requires manual verification of imported %s without opening side effects', async kind => {
+  const order = await h.prepareOrder();
+  const rootDisputeId = randomUUID();
+  const size = kind === 'cycle-with-tail' ? 3 : ['mutual-cycle', 'inconsistent-root', 'duplicate-parent', 'multiple-tails'].includes(kind) ? 2 : 1;
+  const history = [];
+  for (let i = 0; i < size; i++) history.push(await h.prisma.afterSalesCase.create({ data: {
+    orderId: order.id, rootDisputeId: kind === 'inconsistent-root' && i === 1 ? randomUUID() : rootDisputeId,
+    applicantId: h.actors.initiator.id, reason: '导入的已关闭历史', status: 'WITHDRAWN', closedAt: h.clock.now(),
+  } }));
+  const link = (caseId: string, previousCaseId: string | number) => h.prisma.caseRecord.create({ data: { caseId, actorId: h.actors.initiator.id, kind: 'OPENED', description: '导入的不可修改前序关联', details: { previousCaseId } } });
+  if (kind === 'self-cycle') await link(history[0].id, history[0].id);
+  if (['mutual-cycle', 'cycle-with-tail'].includes(kind)) {
+    await link(history[0].id, history[1].id);
+    await link(history[1].id, history[0].id);
+  }
+  if (kind === 'dangling-reference') await link(history[0].id, randomUUID());
+  if (kind === 'inconsistent-root') await link(history[1].id, history[0].id);
+  if (kind === 'duplicate-parent') {
+    await link(history[1].id, history[0].id);
+    await link(history[1].id, randomUUID());
+  }
+  if (kind === 'malformed-reference') await link(history[0].id, 42);
+  const snapshot = async () => ({
+    order: await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } }),
+    cases: await h.prisma.afterSalesCase.findMany({ where: { orderId: order.id }, orderBy: { id: 'asc' } }),
+    records: await h.prisma.caseRecord.count({ where: { case: { orderId: order.id } } }),
+    audits: await h.prisma.auditLog.count(), cache: await h.prisma.idempotencyRecord.count(),
+    blockers: await h.prisma.orderHoldBlocker.count({ where: { orderId: order.id } }),
+  });
+  const before = await snapshot();
+  const response = await h.command(h.actors.initiator, `/api/orders/${order.id}/after-sales`, { expectedOrderVersion: 1, reason: '后续售后申请' }).expect(409);
+  expect(response.body.code).toBe('AFTER_SALES_NOT_ELIGIBLE');
+  expect(response.body.details.manualVerificationRequired).toBe(true);
+  expect(await snapshot()).toEqual(before);
+});
