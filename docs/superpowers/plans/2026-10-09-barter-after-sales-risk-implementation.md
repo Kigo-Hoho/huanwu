@@ -97,11 +97,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `AfterSalesService.open(actor, orderId, input, key): Promise<CaseCommandResult>`；`CaseCommandsService.run(context, mutate: (ctx: CaseMutationContext) => Promise<void>): Promise<CaseCommandResult>`；`readCase(tx, id): Promise<LockedCase|null>`；`CaseRecordsService.respond(context, input): Promise<CaseCommandResult>`；自有列表 `(createdAt,id)` 游标默认20最多50。
 
-- [ ] **Step 1: 写失败测试。** 两方同时 open 仅一份开放工单/暂停审计；同键同内容同结果，改内容409；非参与人404、混合角色403；`completedAt + 7天` 边界拒绝，时间不明返回明确人工核验结果而不猜。开户审计失败回滚工单、订单版本和幂等记录。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/cases.e2e-spec.ts test/phase4/case-races.e2e-spec.ts`。
-- [ ] **Step 3: 实现生命周期。** 读取权限先于缓存重放；OPEN/补证/回应/人工审核、拒绝方案原因、双方撤回请求与关闭；活跃风险或在途义务阻止撤回关闭，不自动恢复。CANCELLED 仅资金异常，终态订单不回退；已有 ON_HOLD 首次原因保留。关闭结果与后续根争议关联，避免重复处置。
-- [ ] **Step 4: GREEN。** 重跑 Step 2，验证原订单自有查询、暂停、验收禁止和 API 错误映射回归。
-- [ ] **Step 5: 审查与提交。** `feat: add participant after-sales cases and records`。
+- [x] **Step 1: 写失败测试。** 两方同时 open 仅一份开放工单/暂停审计；同键同内容同结果，改内容409；非参与人404、混合角色403；`completedAt + 7天` 边界拒绝，时间不明返回明确人工核验结果而不猜。开户审计失败回滚工单、订单版本和幂等记录。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/cases.e2e-spec.ts test/phase4/case-races.e2e-spec.ts`。
+- [x] **Step 3: 实现生命周期。** 读取权限先于缓存重放；OPEN/补证/回应/人工审核、拒绝方案原因、双方撤回请求与关闭；活跃风险或在途义务阻止撤回关闭，不自动恢复。CANCELLED 仅资金异常，终态订单不回退；已有 ON_HOLD 首次原因保留。关闭结果与后续根争议关联，避免重复处置。
+- [x] **Step 4: GREEN。** 重跑 Step 2，验证原订单自有查询、暂停、验收禁止和 API 错误映射回归。
+- [x] **Step 5: 审查与提交。** `feat: add participant after-sales cases and records`。
 
 ### Task 4: 私有证据上传、展示与原件审计
 
@@ -255,7 +255,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～2 已完成，Tasks 3～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～3 已完成，Tasks 4～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
 
 ### Task 1 实际结果
 
@@ -275,3 +275,13 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - GREEN：原候选最终全仓 `npm test` 702项退出0；旧auth11项、最终专项28项及API lint/typecheck通过。独立审查修正后安全文件28项、共享契约3项及API lint/typecheck通过；702不是修正后的全仓结果。测试库隔离/普通清理证明均通过，未操作保留库。
 - 两项独立审查发现分页缺失和bootstrap全部撤销后重开，两位新的独立复查代理确认均修正、无新增阻断。真实HTTP分页覆盖57条和相同时间、默认20/最多50、无重复遗漏/跨账号隔离；真实CLI验证永久关闭、审计失败首次重试和并发仅一次。
 - 原非阻断压行问题留整分支审查；弱隐私断言已加强；Git行尾提示保留说明。Cookie同站部署约束、非硬件/MFA能力不能隐去。全部受信设备丢失后没有自动恢复入口，第五阶段另需明确安全恢复机制。
+
+### Task 3 实际结果（2026-10-12）
+
+- 提交：`18c8d3d`（参与人售后工单及不可修改记录）；`bf9467f`（异常历史链核验和关联待核验事实保护）。
+- 独立售后模块提供自有创建/分页/详情、指定补证与回应、双方撤回、独立管理查询/基本驳回。当前权限先于幂等重放，订单先于工单加锁，双版本/状态/审计/记录/缓存同事务。首次暂停原因保留，关闭不恢复订单或释放占用，终态售后不抢后来交易。
+- RED：初始12项缺路由；后续实际复现跨订单同键500、无关退款放行、前序关联误选、同根风险/未完成义务漏查以及详情混合快照。原详情版本硬编码测试不能证明缺陷，已替换为主行/时间线读取间真实HTTP并发写入。完成义务允许关闭也有实际RED/GREEN，未伪造其他领域完成事实。
+- GREEN：候选全仓 `npm test` 744项退出0（脚本12/admin29/API137+261+110/mini128/contracts67），发生于最终独立管理投影调整前；调整后专项34、契约11、API lint/typecheck通过。原订单专项58项通过。744不是审查修正后全仓结果。
+- 两项独立审查发现Important：非空导入历史零链尾误建新根；同根补偿/退货待核验事件未阻关闭。修正新增8类异常历史及33类外部事实测试，均先观察真实失败。最终三文件75项、API lint/typecheck通过；两位新的独立scoped复查均确认已处理、无新增阻断问题。
+- 所有测试迁移及清理限自有临时库，源库计数/迁移记录不变、临时库普通清理并核验catalog，不宣称逐行源数据一致。没有新迁移、schema/依赖变更、真实业务或推送。Git行尾提示保留记录；短暂模型容量错误恢复后接续原测试，未重复启动。
+- 后续门槛：Task5接真实方案拒绝，Task8/9/10证明归还/资金完成事实写入及同订单锁协议，Task11接通共享请求/定时过期。当前只读这些事实，不伪造执行；交易冻结本身不阻断必要售后，具体风险关联留Task7。
