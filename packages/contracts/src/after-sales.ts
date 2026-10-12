@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AdminEvidenceViewSchema, EvidenceViewSchema } from './evidence.js';
 import { OrderSideSchema } from './orders.js';
 import { ProposalPayerSchema } from './proposals.js';
 
@@ -70,8 +71,8 @@ export const CaseCommandResultSchema = z.strictObject({ case: CaseViewSchema, or
 export const AdminCaseCommandResultSchema = z.strictObject({ case: AdminCaseViewSchema, orderVersion: version });
 export const CaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
 export const AdminCaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
-export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema) });
-export const AdminCaseDetailViewSchema = z.strictObject({ ...AdminCaseViewSchema.shape, records: z.array(AdminCaseRecordViewSchema) });
+export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema), evidence: z.array(EvidenceViewSchema).default([]) });
+export const AdminCaseDetailViewSchema = z.strictObject({ ...AdminCaseViewSchema.shape, records: z.array(AdminCaseRecordViewSchema), evidence: z.array(AdminEvidenceViewSchema).default([]) });
 export const AdminCaseListViewSchema = z.strictObject({ items: z.array(AdminCaseViewSchema), nextCursor: z.string().nullable() });
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 export type ResolutionType = z.infer<typeof ResolutionTypeSchema>;

@@ -54,6 +54,8 @@ OPEN 表示申请已受理；运营可要求指定一方补证，进入 AWAITING
 
 开发/测试可使用独立私有本地目录；生产未配置私有对象存储适配器时明确不可用，不能回退到公开物品目录。先存对象再提交元数据；事务失败的孤立对象由有归属、有限范围的清理任务回收，不删除已引用证据。
 
+Task4 接口澄清（2026-10-12）：`POST /api/after-sales/:id/evidence` 使用 multipart，重复 `files` 字段上传图片，文本字段仅为 `description`、`expectedCaseVersion`、`expectedOrderVersion`；不接受预上传 `imageIds` 或 URL。共享举报追加元数据仅含 `description/expectedVersion`，举报路由仍由 Task7 接通。幂等摘要包含服务端从实际原件计算的 SHA-256 及文件次序。举报追加返回严格 `{resourceId, version}`，富视图由独立鉴权查询提供。工单详情的 `evidence` 仅提供脱敏元数据；运营投影不含上传者 ID。读取 `GET /api/evidence/:id/content?variant=preview|original` 每次验证参与方或绑定运营会话，成功响应使用 `Cache-Control: no-store`，原件访问审计提交后才返回字节。
+
 ## 5. 不可修改的方案与裁决
 
 运营客服或超级管理员可以提出售后方案。方案版本保存作者、原因、关联证据、商品快照 ID、责任结论、运费承担、补偿方向/金额、退款与结算目标及规则版本。方案不可更新/删除；新版本使旧版本所有确认与批准失效。

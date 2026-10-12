@@ -80,7 +80,7 @@ export async function createOrderHarness() {
     return ProposalViewSchema.parse((await command(actors.recipient, `/api/proposals/${proposal.id}/accept`, { expectedVersion: proposal.version }).expect(200)).body);
   }
   return {
-    app, prisma, clock, actors, command, get, confirmedProposal,
+    app, prisma, clock, actors, token, command, get, confirmedProposal,
     convert: (proposal: { id: string; version: number }, actor = actors.initiator, key?: string) => command(actor, `/api/proposals/${proposal.id}/order`, { expectedVersion: proposal.version } satisfies OrderCommandInput, key),
     faultAuditOnce(afterInsert = false) {
       const audit = app.get(AuditService); const original = audit.record.bind(audit);

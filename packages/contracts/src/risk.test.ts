@@ -3,6 +3,11 @@ import type { z } from 'zod';
 import * as contracts from './index.js';
 const schema = (name: string) => { const s = (contracts as unknown as Record<string, z.ZodType>)[name]; expect(s).toBeDefined(); return s!; };
 const id = '00000000-0000-4000-8000-000000000001';
+it('returns only a resource identity and positive version for risk commands', () => {
+  const result = schema('RiskCommandResultSchema');
+  expect(result.safeParse({ resourceId: id, version: 2 }).success).toBe(true);
+  for (const change of [{ version: 0 }, { storageKey: 'secret' }, { reporterId: id }]) expect(result.safeParse({ resourceId: id, version: 2, ...change }).success).toBe(false);
+});
 it('requires structured report targets and their current version', () => {
   const input = { targetType: 'ITEM', targetId: id, expectedTargetVersion: 1, reason: 'PROHIBITED_ITEM', description: '疑似违规物品' };
   expect(schema('CreateRiskReportSchema').safeParse(input).success).toBe(true);

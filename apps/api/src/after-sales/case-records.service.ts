@@ -12,12 +12,19 @@ export class CaseRecordsService {
     return this.commands.run({ ...context, input }, async ctx => {
       if (ctx.case.status === 'EXECUTING') throw new ConflictException({ code: 'AFTER_SALES_NOT_ELIGIBLE', message: 'Execution requires its dedicated workflow' });
       await this.record(ctx, 'RESPONSE', input.description);
-      const side = ctx.order.initiatorId === ctx.actor!.id ? 'INITIATOR' : 'RECIPIENT';
-      if (ctx.case.status === 'AWAITING_RESPONSE' && (ctx.case.responseSide === side || (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline))) {
-        if (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline) await this.record(ctx, 'RESPONSE_OVERDUE', '补证期限已届满，转人工核验', undefined, true);
-        await ctx.tx.afterSalesCase.update({ where: { id: ctx.case.id }, data: { status: 'UNDER_REVIEW', responseSide: null, responseDeadline: null } });
-      }
+      await this.advanceEvidenceResponse(ctx);
     });
+  }
+  async recordEvidenceInTransaction(ctx: CaseMutationContext, description: string, evidenceIds: string[]): Promise<void> {
+    await this.record(ctx, 'EVIDENCE_APPENDED', description, { evidenceIds });
+    await this.advanceEvidenceResponse(ctx);
+  }
+  private async advanceEvidenceResponse(ctx: CaseMutationContext): Promise<void> {
+    const side = ctx.order.initiatorId === ctx.actor!.id ? 'INITIATOR' : 'RECIPIENT';
+    if (ctx.case.status === 'AWAITING_RESPONSE' && (ctx.case.responseSide === side || (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline))) {
+      if (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline) await this.record(ctx, 'RESPONSE_OVERDUE', '补证期限已届满，转人工核验', undefined, true);
+      await ctx.tx.afterSalesCase.update({ where: { id: ctx.case.id }, data: { status: 'UNDER_REVIEW', responseSide: null, responseDeadline: null } });
+    }
   }
   requestEvidence(context: OperatorCaseCommandContext, input: CaseEvidenceRequestInput) {
     return this.commands.run({ ...context, input }, async ctx => {

@@ -152,3 +152,11 @@ Phase 2 的 CONFIRMED 表示最新方案的所有 2～6 件物品被独占占用
 最终只读证明显示保留源库 `barter` 仍只有原两次 migration、12 张 public 表行数不变、遗留 Phase 3 测试库为零。这是迁移／计数／目录证据，不是逐字节备份。源库**尚未升级为可运行的 Phase 3 演示／业务库**；新迁移只在独占的新建／增量升级测试库验证。未来部署必须明确选择并备份目标库，应用已提交的 migration 和运行配置后再启动服务；质量门不会静默升级保留源库。运行只需仓库已提交的入口与自行配置的环境，不依赖私有临时辅助程序。含测试凭据／地址的日志和 trace 私下保留，不提交或上传。
 
 真实微信身份、生产图片存储、支付资金路径、物流合作方、地址密钥管理、第四阶段异常／售后和第五阶段上线质量门仍是正式运营依赖。
+
+## Phase 4 私有证据接口与运行配置
+
+售后图片使用 `POST /api/after-sales/:id/evidence`，携带客户身份、`Idempotency-Key`，multipart 文本字段为 `description`、`expectedCaseVersion`、`expectedOrderVersion`，重复 `files` 字段为 1～9 张图片。支持 JPEG/PNG/WebP，每张最多 8 MiB、最长边 8192、4000 万像素；每名参与者每份工单累计最多 30 张。说明 1～2000 字，元数据和文件不可替换，纠正通过追加完成。详情仅给出附件元数据；通过鉴权的 `/api/evidence/:id/content?variant=preview|original` 读取，响应不缓存。预览去除 EXIF，原件保留摘要并记录访问审计。
+
+`NODE_ENV=development/test` 使用 `LOCAL_PRIVATE_EVIDENCE_DIR`（默认 `.local/private-evidence`），该目录必须与 `LOCAL_IMAGE_STORAGE_DIR` 分离且不得对外静态发布。对象使用随机不透明键，仅上传自己的孤立对象可以有限清理，已被元数据引用的对象不删除。生产没有私有存储适配器时返回 503，不回退本地目录。生产部署仍需自行接入并验证私有存储及访问控制。举报附件服务已定义并验证授权隔离，举报业务路由留给 Task7。
+
+API 新增 `sharp`，当前锁定 0.35.5。保留平台可选原生依赖；当前安装版本没有 `preinstall/install/postinstall` 生命周期脚本，未增加无用的 npm `allowScripts`。实际解码与元数据限制参照 [sharp 构造选项](https://sharp.pixelplumbing.com/api-constructor/)、[输出说明](https://sharp.pixelplumbing.com/api-output/)及[安装文档](https://sharp.pixelplumbing.com/install/)。

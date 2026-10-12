@@ -1,5 +1,5 @@
-import { AdminCaseRecordViewSchema, AdminCaseViewSchema, CaseRecordViewSchema, CaseViewSchema } from '@barter/contracts';
-import type { AfterSalesCase, CaseRecord, Prisma } from '../generated/prisma/client.js';
+import { AdminCaseRecordViewSchema, AdminCaseViewSchema, AdminEvidenceViewSchema, CaseRecordViewSchema, CaseViewSchema, EvidenceViewSchema } from '@barter/contracts';
+import type { AfterSalesCase, CaseEvidence, CaseRecord, Prisma } from '../generated/prisma/client.js';
 import type { LockedOrder } from '../orders/order.mapper.js';
 
 export function mapCase(value: AfterSalesCase) {
@@ -42,4 +42,10 @@ export function mapAdminCaseRecord(record: CaseRecord, order: LockedOrder) {
     actorKind: record.actorId === null ? 'SYSTEM' : participantSide ? 'CUSTOMER' : 'PLATFORM',
     side: participantSide ?? requestedSide, description: record.description, createdAt: record.createdAt.toISOString(),
   });
+}
+export function mapCaseEvidence(value: CaseEvidence) {
+  return EvidenceViewSchema.parse({ id: value.id, uploaderId: value.uploaderId, description: value.description, mimeType: value.mimeType, bytes: value.bytes, width: value.width, height: value.height, sha256: value.sha256, createdAt: value.createdAt.toISOString() });
+}
+export function mapAdminCaseEvidence(value: CaseEvidence) {
+  return AdminEvidenceViewSchema.parse({ id: value.id, description: value.description, mimeType: value.mimeType, bytes: value.bytes, width: value.width, height: value.height, sha256: value.sha256, createdAt: value.createdAt.toISOString() });
 }
