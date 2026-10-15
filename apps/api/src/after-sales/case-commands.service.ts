@@ -41,7 +41,7 @@ export class CaseCommandsService {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(OperatorSessionService) private readonly sessions: OperatorSessionService,
   ) {}
-  async run(context: CaseCommandContext | OperatorCaseCommandContext, mutate: (ctx: CaseMutationContext) => Promise<void>): Promise<CaseCommandResult> {
+  async run(context: CaseCommandContext | OperatorCaseCommandContext, mutate: (ctx: CaseMutationContext) => Promise<void>, lockAuthorities?: (tx: CaseTx) => Promise<void>): Promise<CaseCommandResult> {
     assertCaseKey(context.key);
     const identity = { actorId: context.actor.id, commandName: context.commandName, key: context.key };
     const requestHash = canonicalHash({ id: context.caseId, input: context.input });
@@ -49,6 +49,9 @@ export class CaseCommandsService {
     const located = await this.prisma.afterSalesCase.findUnique({ where: { id: context.caseId }, select: { orderId: true } });
     if (!located) throw new NotFoundException({ code: 'AFTER_SALES_NOT_FOUND', message: 'After-sales case was not found' });
     return caseTransaction(this.prisma, async tx => {
+      // Multi-person authority fences must precede even the executing actor's
+      // session locks, and all order/case locks. Never upgrade actor locks later.
+      await lockAuthorities?.(tx);
       if ('operatorSession' in context) {
         await this.sessions.assertCurrent(tx, context.operatorSession, context.requiredAction ? actionCapability(context.requiredAction) : 'MOBILE_LIMITED');
         assertCaseOperator(context.operatorSession.actor);

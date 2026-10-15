@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import request from 'supertest';
@@ -7,6 +7,8 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { createAfterSalesHarness, type AfterSalesHarness } from './support/after-sales-harness.js';
 import { operatorRequestHash } from '../../src/operator-security/operator-action.types.js';
 import type { CaseMutationContext, LockedCase } from '../../src/after-sales/case.types.js';
+import { LogisticsEventsService } from '../../src/logistics/logistics-events.service.js';
+import { SimulatedLogisticsAdapter } from '../../src/integrations/simulated-logistics.adapter.js';
 
 let h: AfterSalesHarness;
 type Session = Awaited<ReturnType<AfterSalesHarness['operatorLogin']>>;
@@ -39,14 +41,34 @@ beforeAll(async () => {
 });
 afterAll(async () => { await h?.close(); });
 afterEach(() => { vi.restoreAllMocks(); });
-async function fixture(options: { financial?: boolean; author?: Session; consent?: boolean; payment?: boolean } = {}) {
-  let order = await h.prepareOrder({ mode: 'IN_PERSON' });
+async function fixture(options: { financial?: boolean; author?: Session; consent?: boolean; payment?: boolean; returnOriginals?: boolean } = {}) {
+  let order = await h.prepareOrder({ mode: options.returnOriginals ? 'COURIER' : 'IN_PERSON' });
+  if (options.returnOriginals) {
+    // Like the existing logistics harness, establish confirmed funding as fixture
+    // state, then exercise real trusted facts without invoking a provider effect.
+    await h.prisma.order.update({ where: { id: order.id }, data: { status: 'AWAITING_FULFILLMENT', detailsDeadline: null, fulfillmentDeadline: new Date(h.clock.now().getTime() + 72 * 3600000) } });
+    await h.prisma.orderPartyProgress.updateMany({ where: { orderId: order.id }, data: { fundsReady: true } });
+    const id = randomUUID();
+    const shipment = await h.prisma.shipment.create({ data: { id, orderId: order.id, side: 'INITIATOR', carrier: 'SF', trackingNumber: randomUUID(), businessNo: `shipment:${id}`, registeredAt: h.clock.now() } });
+    for (const progress of ['EXCEPTION', 'DELIVERED'] as const) {
+      const raw = JSON.stringify({ provider: 'simulated', eventId: randomUUID(), kind: 'SHIPMENT_PROGRESS', businessNo: shipment.businessNo, shipmentId: shipment.id, progress, occurredAt: h.clock.now().toISOString() });
+      const signature = createHmac('sha256', Buffer.from(process.env.SIMULATED_INTEGRATION_SIGNING_KEY_BASE64!, 'base64')).update(raw).digest('hex');
+      await h.app.get(LogisticsEventsService).applyVerified(h.app.get(SimulatedLogisticsAdapter).verifySignedEvent(raw, signature));
+    }
+    expect(await h.prisma.shipment.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'EXCEPTION', deliveredAt: h.clock.now() });
+    expect(await h.prisma.shipmentEvent.count({ where: { shipmentId: id } })).toBe(2);
+    order = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+  }
   if (options.payment) order = (await h.command(h.actors.initiator, `/api/orders/${order.id}/payments`, { expectedVersion: order.version, purpose: 'DEPOSIT' }).expect(202)).body.order;
   const opened: CaseCommandResult = (await h.command(h.actors.initiator, `/api/orders/${order.id}/after-sales`, { expectedOrderVersion: order.version, reason: '审批执行测试争议' }).expect(201)).body;
   const snapshots = await h.prisma.orderItemSnapshot.findMany({ where: { orderId: order.id } });
   const payments = await h.prisma.paymentIntent.findMany({ where: { orderId: order.id } });
   const financial = options.financial !== false;
   const input: ResolutionInput = { ...versions(opened), resolutionVersion: 1, type: financial ? 'KEEP_WITH_COMPENSATION' : 'CONTINUE_EXCHANGE', reason: '明确当前版本的处理方案', rulesVersion: 'phase4-simulation-v1', evidenceIds: [], itemSnapshotIds: snapshots.map(s => s.id), responsibility: 'NONE', originalFunds: payments.map(p => ({ paymentIntentId: p.id, destination: financial ? 'REFUND_PAYER' : 'RETAIN_FOR_EXCHANGE' })), returnPlan: [], compensationComponents: { originalDifferenceReversal: { amountFen: 0, payer: 'NONE' }, initiatorExtraFen: financial ? 500 : 0, recipientExtraFen: 0, initiatorShippingFen: 0, recipientShippingFen: 0 }, netCompensation: { amountFen: financial ? 500 : 0, payer: financial ? 'INITIATOR' : 'NONE' }, orderOutcome: financial ? 'COMPLETE' : 'RESUME' };
+  if (options.returnOriginals) {
+    input.type = 'RETURN_ORIGINALS'; input.orderOutcome = 'CANCEL';
+    input.returnPlan = snapshots.map(s => ({ itemSnapshotId: s.id, outcome: s.side === 'INITIATOR' ? 'RETURN_ORIGINAL' : 'UNDELIVERED' }));
+  }
   const path = `/api/admin/after-sales/${opened.case.id}`;
   let result: CaseCommandResult = (await post(options.author ?? ops, `${path}/resolutions`, input).expect(200)).body;
   if (options.consent !== false) for (const actor of [h.actors.initiator, h.actors.recipient]) result = (await h.command(actor, `/api/after-sales/${opened.case.id}/consent`, { ...versions(result), resolutionVersion: 1, decision: 'AGREE' }).expect(200)).body;
@@ -73,6 +95,129 @@ function registerPlanner(type = 'KEEP_WITH_COMPENSATION') {
 async function counts(f: Fixture) {
   return { approvals: await h.prisma.resolutionApproval.count({ where: { resolution: { caseId: f.caseId } } }), executions: await h.prisma.resolutionExecution.count({ where: { resolution: { caseId: f.caseId } } }), outbox: await h.prisma.outboxCommand.count({ where: { orderId: f.order.id } }) };
 }
+function barrier() {
+  let release!: () => void;
+  const entered = new Promise<void>(resolve => { release = resolve; });
+  return { entered, release };
+}
+async function mutationState(pid: number, finished: () => boolean) {
+  let blocked = false;
+  await vi.waitFor(async () => {
+    const rows = await h.prisma.$queryRaw<{ blocked: boolean }[]>`SELECT cardinality(pg_blocking_pids(${pid}::int)) > 0 AS blocked`;
+    blocked = rows[0].blocked;
+    expect(blocked || finished()).toBe(true);
+  }, { timeout: 2000, interval: 10 });
+  return blocked;
+}
+
+it('admits historical shipment exceptions after independent risks and blockers are cleared without rewriting shipment facts', async () => {
+  const f = await fixture({ returnOriginals: true }); await approve(f, one); await approve(f, two);
+  const risk = await h.prisma.riskTask.create({ data: { orderId: f.order.id, kind: 'LOGISTICS_EXCEPTION', sourceKey: randomUUID(), description: '独立物流核验' } });
+  const blocker = await h.prisma.orderHoldBlocker.findUniqueOrThrow({ where: { orderId_kind_sourceId: { orderId: f.order.id, kind: 'RISK', sourceId: 'hold:LOGISTICS_EXCEPTION' } } });
+  const input = await authorized(f, one, 'EXECUTE_FUNDS'); const key = randomUUID();
+  const unchanged = async () => {
+    expect(await counts(f)).toEqual({ approvals: 2, executions: 0, outbox: 0 });
+    expect((await h.prisma.actionGrant.findUniqueOrThrow({ where: { id: input.operatorAction.grantId } })).consumedAt).toBeNull();
+    expect((await h.prisma.afterSalesCase.findUniqueOrThrow({ where: { id: f.caseId } })).version).toBe(f.result.case.version);
+    expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).version).toBe(f.result.orderVersion);
+    expect(await h.prisma.idempotencyRecord.count({ where: { commandName: 'CASE_RESOLUTION_EXECUTION_STARTED', key } })).toBe(0);
+  };
+  await post(one, `${f.path}/execute`, input, key).expect(409).expect(r => expect(r.body.code).toBe('RISK_BLOCKS_RESUME')); await unchanged();
+  await h.prisma.riskTask.update({ where: { id: risk.id }, data: { status: 'RESOLVED' } });
+  await post(one, `${f.path}/execute`, input, key).expect(409).expect(r => expect(r.body.code).toBe('RISK_BLOCKS_RESUME')); await unchanged();
+  await h.prisma.orderHoldBlocker.update({ where: { id: blocker.id }, data: { resolvedAt: h.clock.now() } });
+  await post(one, `${f.path}/execute`, input, key).expect(503).expect(r => expect(r.body.code).toBe('RESOLUTION_EXECUTOR_UNAVAILABLE')); await unchanged();
+  registerPlanner('RETURN_ORIGINALS');
+  try {
+    await post(one, `${f.path}/execute`, input, key).expect(200);
+    expect(await counts(f)).toEqual({ approvals: 2, executions: 1, outbox: 1 });
+    expect((await h.prisma.shipment.findFirstOrThrow({ where: { orderId: f.order.id } })).status).toBe('EXCEPTION');
+  } finally { registry().clear(); }
+});
+
+it.each(['role', 'credential', 'account'] as const)('serializes non-executing approver %s revocation after execution commits', async kind => {
+  const f = await fixture(); await approve(f, one); await approve(f, two);
+  const input = await authorized(f, one, 'EXECUTE_FUNDS');
+  const credential = await h.prisma.adminCredential.findUniqueOrThrow({ where: { userId: h.actors.superAdminTwo.id } });
+  const planned = barrier(); const finishPlan = barrier(); const mutationStarted = barrier();
+  registerPlanner(); const planner = registry().get('KEEP_WITH_COMPENSATION')!;
+  registry().set('KEEP_WITH_COMPENSATION', { async planInTransaction(ctx, resolution) {
+    await planner.planInTransaction(ctx, resolution); planned.release(); await finishPlan.entered;
+  } });
+  const execution = post(one, `${f.path}/execute`, input).then(r => r);
+  let mutation: Promise<void> | undefined; let mutationFinished = false; let pid = 0;
+  try {
+    await Promise.race([planned.entered, execution.then(r => { throw new Error(`Execution completed before the planner barrier: ${r.status}`); })]);
+    mutation = h.prisma.$transaction(async tx => {
+      [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      mutationStarted.release();
+      if (kind === 'role') await tx.userRole.delete({ where: { userId_role: { userId: h.actors.superAdminTwo.id, role: 'SUPER_ADMIN' } } });
+      else if (kind === 'credential') await tx.adminCredential.delete({ where: { userId: h.actors.superAdminTwo.id } });
+      else await tx.user.update({ where: { id: h.actors.superAdminTwo.id }, data: { disabledAt: h.clock.now() } });
+    }).then(() => { mutationFinished = true; });
+    await mutationStarted.entered;
+    expect(await mutationState(pid, () => mutationFinished)).toBe(true);
+    expect(mutationFinished).toBe(false);
+    finishPlan.release();
+    expect((await execution).status).toBe(200); await mutation;
+    expect(await counts(f)).toEqual({ approvals: 2, executions: 1, outbox: 1 });
+    expect(mutationFinished).toBe(true);
+  } finally {
+    finishPlan.release(); await execution; await mutation;
+    if (kind === 'role') await h.prisma.userRole.upsert({ where: { userId_role: { userId: h.actors.superAdminTwo.id, role: 'SUPER_ADMIN' } }, create: { userId: h.actors.superAdminTwo.id, role: 'SUPER_ADMIN' }, update: {} });
+    else if (kind === 'credential') await h.prisma.adminCredential.upsert({ where: { userId: credential.userId }, create: credential, update: {} });
+    else await h.prisma.user.update({ where: { id: h.actors.superAdminTwo.id }, data: { disabledAt: null } });
+    registry().clear();
+  }
+});
+
+it('rejects execution when non-executing approver revocation commits first without planning or consuming the grant', async () => {
+  const f = await fixture(); await approve(f, one); await approve(f, two); registerPlanner();
+  const input = await authorized(f, one, 'EXECUTE_FUNDS'); const key = randomUUID();
+  const revoked = barrier(); const commitRevocation = barrier(); let revocationPid = 0;
+  const revocation = h.prisma.$transaction(async tx => {
+    [{ pid: revocationPid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+    await tx.userRole.delete({ where: { userId_role: { userId: h.actors.superAdminTwo.id, role: 'SUPER_ADMIN' } } });
+    revoked.release(); await commitRevocation.entered;
+  });
+  let execution: Promise<{ status: number; body: unknown }> | undefined; let executionFinished = false;
+  try {
+    await revoked.entered;
+    execution = post(one, `${f.path}/execute`, input, key).then(r => { executionFinished = true; return r; });
+    let blocked = false;
+    await vi.waitFor(async () => {
+      const rows = await h.prisma.$queryRaw<{ blocked: boolean }[]>`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND ${revocationPid}::int = ANY(pg_blocking_pids(pid))) AS blocked`;
+      blocked = rows[0].blocked;
+      expect(blocked || executionFinished).toBe(true);
+    }, { timeout: 2000, interval: 10 });
+    expect(blocked).toBe(true);
+    // Execution is now waiting on the uncommitted DELETE, rather than counting
+    // the old visible SUPER_ADMIN role and planning from stale authority.
+    commitRevocation.release(); await revocation;
+    const result = await execution;
+    expect(result).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } });
+    expect(await counts(f)).toEqual({ approvals: 2, executions: 0, outbox: 0 });
+    expect((await h.prisma.actionGrant.findUniqueOrThrow({ where: { id: input.operatorAction.grantId } })).consumedAt).toBeNull();
+    expect((await h.prisma.afterSalesCase.findUniqueOrThrow({ where: { id: f.caseId } })).version).toBe(f.result.case.version);
+    expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).version).toBe(f.result.orderVersion);
+    expect(await h.prisma.idempotencyRecord.count({ where: { commandName: 'CASE_RESOLUTION_EXECUTION_STARTED', key } })).toBe(0);
+  } finally {
+    commitRevocation.release(); await revocation; await execution;
+    await h.prisma.userRole.create({ data: { userId: h.actors.superAdminTwo.id, role: 'SUPER_ADMIN' } }); registry().clear();
+  }
+});
+
+it('serializes different approving executors in one identity order without a role-to-order deadlock', async () => {
+  const f = await fixture(); await approve(f, one); await approve(f, two); registerPlanner();
+  try {
+    const a = await authorized(f, one, 'EXECUTE_FUNDS'); const b = await authorized(f, two, 'EXECUTE_FUNDS');
+    const results = await Promise.all([post(one, `${f.path}/execute`, a), post(two, `${f.path}/execute`, b)]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect(await counts(f)).toEqual({ approvals: 2, executions: 1, outbox: 1 });
+    const rejectedInput = results[0].status === 409 ? a : b;
+    expect((await h.prisma.actionGrant.findUniqueOrThrow({ where: { id: rejectedInput.operatorAction.grantId } })).consumedAt).toBeNull();
+  } finally { registry().clear(); }
+});
 
 it('requires two distinct approvals and explicitly rejects an unregistered executor without consuming its grant', async () => {
   const f = await fixture();
