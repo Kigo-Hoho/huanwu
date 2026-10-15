@@ -321,6 +321,8 @@ enum IntegrationOperationKind {
   SETTLE_DIFFERENCE
   VERIFY_SHIPMENT
   QUERY_SHIPMENT
+  VERIFY_RETURN
+  CLOSE_OR_INTERCEPT
 }
 
 enum IntegrationEventKind {
@@ -329,6 +331,8 @@ enum IntegrationEventKind {
   REFUND_SUCCEEDED
   DIFFERENCE_SETTLED
   SHIPMENT_PROGRESS
+  RETURN_PROGRESS
+  ORIGINAL_SHIPMENT_CLOSED
 }
 
 enum IntegrationReceiptStatus {
@@ -935,12 +939,28 @@ model ReturnObligation {
 
 model ReturnProgress {
   obligationId    String           @id @db.Uuid
+  version         Int              @default(1)
   status          ReturnStatus     @default(PENDING)
   receiptDeadline DateTime?
   handedOverAt    DateTime?
   confirmedAt     DateTime?
   updatedAt       DateTime         @updatedAt
   obligation      ReturnObligation @relation("ReturnProgress_obligation", fields: [obligationId], references: [id], onDelete: Restrict)
+}
+
+// Append-only provider closure proof; original Shipment is never rewritten.
+model OriginalShipmentClosure {
+  shipmentId   String   @id @db.Uuid
+  resolutionId String   @db.Uuid
+  outcome      String
+  eventId      String   @unique @db.Uuid
+  createdAt    DateTime @default(now())
+}
+
+model ShipmentTrackingIdentity {
+  trackingNumber String @id
+  shipmentId     String @unique @db.Uuid
+  source         String
 }
 
 model ReturnAddress {

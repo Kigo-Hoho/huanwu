@@ -13,5 +13,17 @@ export class SimulatedLogisticsAdapter implements LogisticsPort {
     return this.store.execute(operation);
   }
   async queryShipment(businessNo: string): Promise<ProviderResult> { this.store.assertEnabled('logistics'); return this.store.query(businessNo, ['VERIFY_SHIPMENT', 'QUERY_SHIPMENT']); }
+  async verifyReturn(operation: ProviderOperation): Promise<ProviderResult> {
+    this.store.assertEnabled('logistics');
+    if (operation.kind !== 'VERIFY_RETURN') throw new BadRequestException('Wrong return operation');
+    return this.store.execute(operation);
+  }
+  async queryReturn(operation: ProviderOperation): Promise<ProviderResult> { this.store.assertEnabled('logistics'); return this.store.query(operation.businessNo, ['VERIFY_RETURN']); }
+  async closeOrIntercept(operation: ProviderOperation): Promise<ProviderResult> {
+    this.store.assertEnabled('logistics');
+    if (operation.kind !== 'CLOSE_OR_INTERCEPT') throw new BadRequestException('Wrong interception operation');
+    return this.store.execute(operation);
+  }
+  async queryInterception(operation: ProviderOperation): Promise<ProviderResult> { this.store.assertEnabled('logistics'); return this.store.query(operation.businessNo, ['CLOSE_OR_INTERCEPT']); }
   verifySignedEvent(raw: string, signature: string): VerifiedIntegrationEvent { return this.store.verifySignedEvent(raw, signature, 'logistics'); }
 }

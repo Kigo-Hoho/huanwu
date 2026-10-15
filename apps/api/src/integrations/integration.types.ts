@@ -8,6 +8,8 @@ interface EventIdentity { provider: string; eventId: string; businessNo: string;
 export type VerifiedIntegrationEvent = EventIdentity & (
   | { kind: 'PAYMENT_SUCCEEDED' | 'PAYMENT_CLOSED' | 'REFUND_SUCCEEDED' | 'DIFFERENCE_SETTLED'; externalTransactionId: string; amountFen: number; currency: string }
   | { kind: 'SHIPMENT_PROGRESS'; shipmentId: string; progress: ShipmentStatus }
+  | { kind: 'RETURN_PROGRESS'; shipmentId: string; progress: ShipmentStatus }
+  | { kind: 'ORIGINAL_SHIPMENT_CLOSED'; shipmentId: string; outcome: 'DELIVERED'|'INTERCEPTED' }
 );
 export type ProviderResult =
   | { status: 'SUCCESS'; externalTransactionId: string; event: VerifiedIntegrationEvent }

@@ -11,6 +11,7 @@ import { OrderExpiryService } from '../orders/order-expiry.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { ReservationsService } from '../reservations/reservations.service.js';
 import { RiskTaskService } from '../risk/risk-task.service.js';
+import { ReturnEventsService } from '../returns/return-events.service.js';
 
 @Injectable()
 export class LogisticsEventsService {
@@ -23,6 +24,7 @@ export class LogisticsEventsService {
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
     @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
     @Inject(RiskTaskService) private readonly risks: RiskTaskService,
+    @Inject(ReturnEventsService) private readonly returns: ReturnEventsService,
   ) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
     if (event.kind !== 'SHIPMENT_PROGRESS') throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a logistics event' });
@@ -31,6 +33,7 @@ export class LogisticsEventsService {
       if (association) {
         await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${association.orderId}::uuid FOR UPDATE`;
         const order = await readOrder(tx, association.orderId); if (!order) throw new Error('Shipment order is missing');
+        await this.returns.lockOriginalCasesInTransaction(tx, order.id);
         await this.reservations.lockItems(tx, order.items.map(item => item.itemId));
         await tx.$queryRaw`SELECT id FROM "PaymentIntent" WHERE "orderId" = ${order.id}::uuid ORDER BY id FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM "Shipment" WHERE "orderId" = ${order.id}::uuid ORDER BY id FOR UPDATE`;
@@ -72,6 +75,7 @@ export class LogisticsEventsService {
       }
       const deliveryEvidence = event.progress === 'DELIVERED' && !shipment.deliveredAt && shipment.status === 'EXCEPTION';
       if (deliveryEvidence) await tx.shipment.update({ where: { id: shipment.id }, data: { deliveredAt: new Date(event.occurredAt) } });
+      if (event.progress === 'DELIVERED') await this.returns.reconcileOriginalDeliveryInTransaction(tx, shipment);
       // Facts remain visible after a hold/terminal decision, but cannot reopen fulfillment.
       if (advanced && event.progress === 'DELIVERED') {
         const incomingSide = shipment.side === 'INITIATOR' ? 'RECIPIENT' : 'INITIATOR';

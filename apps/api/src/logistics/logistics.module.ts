@@ -11,5 +11,6 @@ import { OrderFulfillmentController } from './order-fulfillment.controller.js';
 import { ReservationsModule } from '../reservations/reservations.module.js';
 import { LogisticsOutboxHandler } from './logistics-outbox.handler.js';
 import { RiskTaskService } from '../risk/risk-task.service.js';
-@Module({ imports: [AuthModule, AuditModule, ClockModule, IntegrationsModule, OrdersModule, ReservationsModule], controllers: [OrderFulfillmentController], providers: [ShipmentsService, LogisticsEventsService, OrderHandoverService, LogisticsOutboxHandler, RiskTaskService], exports: [ShipmentsService, LogisticsEventsService, OrderHandoverService, LogisticsOutboxHandler] })
+import { ReturnsModule } from '../returns/returns.module.js';
+@Module({ imports: [AuthModule, AuditModule, ClockModule, IntegrationsModule, OrdersModule, ReservationsModule, ReturnsModule], controllers: [OrderFulfillmentController], providers: [ShipmentsService, LogisticsEventsService, OrderHandoverService, LogisticsOutboxHandler, RiskTaskService], exports: [ShipmentsService, LogisticsEventsService, OrderHandoverService, LogisticsOutboxHandler] })
 export class LogisticsModule {}

@@ -311,7 +311,7 @@ it('holds contradictory successful closure after a paid fact instead of automati
 it('refuses a worker result for another valid payment instead of marking either obligation funded', async () => {
   const a = await pendingPair(); const b = await pendingPair();
   const first = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: a.first } }); const second = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: b.first } });
-  const event = signed(second); if (event.kind === 'SHIPMENT_PROGRESS') throw new Error('Expected financial fixture');
+  const event = signed(second); if ('shipmentId' in event) throw new Error('Expected financial fixture');
   await expect(h.app.get(PaymentOutboxHandler).apply({ orderId: a.order.id, businessNo: first.businessNo, kind: 'CREATE_PAYMENT', payload: { amountFen: 1000, currency: 'CNY' } }, { status: 'SUCCESS', event, externalTransactionId: event.externalTransactionId })).rejects.toThrow();
   expect(await h.prisma.financialEntry.count({ where: { intentId: { in: [first.id, second.id] } } })).toBe(0);
 });

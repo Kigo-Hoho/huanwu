@@ -13,10 +13,13 @@ const money = { amountFen: z.number().int().positive().max(Number.MAX_SAFE_INTEG
 const eventSchema = z.union([
   z.object({ ...identity, ...money, currency: z.string().regex(/^[A-Z]{3}$/), kind: z.enum(['PAYMENT_SUCCEEDED', 'PAYMENT_CLOSED', 'REFUND_SUCCEEDED', 'DIFFERENCE_SETTLED']), externalTransactionId: z.string().min(1).max(200) }).strict(),
   z.object({ ...identity, kind: z.literal('SHIPMENT_PROGRESS'), shipmentId: z.uuid(), progress: z.enum(['REGISTERED', 'COLLECTED', 'DELIVERED', 'EXCEPTION']) }).strict(),
+  z.object({ ...identity, kind: z.literal('RETURN_PROGRESS'), shipmentId: z.uuid(), progress: z.enum(['REGISTERED', 'COLLECTED', 'DELIVERED', 'EXCEPTION']) }).strict(),
+  z.object({ ...identity, kind: z.literal('ORIGINAL_SHIPMENT_CLOSED'), shipmentId: z.uuid(), outcome: z.enum(['DELIVERED', 'INTERCEPTED']) }).strict(),
 ]);
 const invalid = () => new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Integration event or operation is invalid' });
 const conflict = () => new ConflictException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Integration facts conflict with the recorded operation' });
-const logistics = (kind: IntegrationOperationKind) => kind === 'VERIFY_SHIPMENT' || kind === 'QUERY_SHIPMENT';
+const logistics = (kind: IntegrationOperationKind) => ['VERIFY_SHIPMENT', 'QUERY_SHIPMENT', 'VERIFY_RETURN', 'CLOSE_OR_INTERCEPT'].includes(kind);
+const logisticsEvent = (event: VerifiedIntegrationEvent) => ['SHIPMENT_PROGRESS', 'RETURN_PROGRESS', 'ORIGINAL_SHIPMENT_CLOSED'].includes(event.kind);
 const json = (result: ProviderResult) => result as unknown as Prisma.InputJsonObject;
 const resultOf = (row: SimulatedProviderOperation): ProviderResult => row.result as unknown as ProviderResult;
 
@@ -35,7 +38,7 @@ export class SimulatedProviderStore {
     if (!timingSafeEqual(expected, Buffer.from(signature, 'hex'))) throw invalid();
     try {
       const event = eventSchema.parse(JSON.parse(raw));
-      if ((event.kind === 'SHIPMENT_PROGRESS') !== (channel === 'logistics')) throw invalid();
+      if (logisticsEvent(event) !== (channel === 'logistics')) throw invalid();
       return event;
     } catch { throw invalid(); }
   }
@@ -90,16 +93,23 @@ export class SimulatedProviderStore {
   // No Order, PaymentIntent, or ledger mutation belongs in the simulated external service.
   async recordEvent(value: VerifiedIntegrationEvent): Promise<void> {
     const parsed = eventSchema.safeParse(value); if (!parsed.success) throw invalid();
-    const event = parsed.data; this.assertEnabled(event.kind === 'SHIPMENT_PROGRESS' ? 'logistics' : 'payment');
+    const event = parsed.data; this.assertEnabled(logisticsEvent(event) ? 'logistics' : 'payment');
     await this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "SimulatedProviderOperation" WHERE "businessNo" = ${event.businessNo} FOR UPDATE`;
       const row = await tx.simulatedProviderOperation.findUnique({ where: { businessNo: event.businessNo } });
       if (!row) throw invalid();
       const payload = row.payload as Prisma.JsonObject;
-      if (event.kind === 'SHIPMENT_PROGRESS') {
-        if (!logistics(row.kind) || payload.shipmentId !== event.shipmentId) throw conflict();
+      if (event.kind === 'ORIGINAL_SHIPMENT_CLOSED') {
+        if (row.kind !== 'CLOSE_OR_INTERCEPT' || payload.shipmentId !== event.shipmentId) throw conflict();
         const prior = resultOf(row);
-        if (prior.status === 'SUCCESS' && prior.event.kind === 'SHIPMENT_PROGRESS') {
+        if (prior.status === 'SUCCESS' && (prior.event.kind !== event.kind || prior.event.outcome !== event.outcome)) throw conflict();
+        const source = typeof payload.originalBusinessNo === 'string' ? await tx.simulatedProviderOperation.findUnique({ where: { businessNo: payload.originalBusinessNo } }) : null;
+        const original = source && resultOf(source);
+        if (event.outcome === 'INTERCEPTED' && original?.status === 'SUCCESS' && original.event.kind === 'SHIPMENT_PROGRESS' && original.event.progress === 'DELIVERED') throw conflict();
+      } else if (event.kind === 'SHIPMENT_PROGRESS' || event.kind === 'RETURN_PROGRESS') {
+        if (payload.shipmentId !== event.shipmentId || (event.kind === 'RETURN_PROGRESS' ? row.kind !== 'VERIFY_RETURN' : !['VERIFY_SHIPMENT', 'QUERY_SHIPMENT'].includes(row.kind))) throw conflict();
+        const prior = resultOf(row);
+        if (prior.status === 'SUCCESS' && (prior.event.kind === 'SHIPMENT_PROGRESS' || prior.event.kind === 'RETURN_PROGRESS')) {
           const ranks = { REGISTERED: 0, COLLECTED: 1, DELIVERED: 2, EXCEPTION: 3 };
           if (ranks[event.progress] < ranks[prior.event.progress]) throw conflict();
         }
@@ -111,7 +121,7 @@ export class SimulatedProviderStore {
           return;
         }
       }
-      const externalTransactionId = event.kind === 'SHIPMENT_PROGRESS' ? event.shipmentId : event.externalTransactionId;
+      const externalTransactionId = 'shipmentId' in event ? event.shipmentId : event.externalTransactionId;
       const result: ProviderResult = { status: 'SUCCESS', externalTransactionId, event };
       await tx.simulatedProviderOperation.update({ where: { id: row.id }, data: { status: 'SUCCESS', externalTransactionId, result: json(result) } });
     });

@@ -27,7 +27,7 @@ export class PaymentEventsService {
     @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
-    if (event.kind === 'SHIPMENT_PROGRESS') throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a financial event' });
+    if ('shipmentId' in event) throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a financial event' });
     const effect = event.kind === 'PAYMENT_SUCCEEDED' ? null : await this.prisma.outboxCommand.findUnique({ where: { businessNo: event.businessNo } });
     const originalNo = effect ? (effect.payload as Prisma.JsonObject).paymentBusinessNo : event.businessNo;
     const association = typeof originalNo === 'string' ? await this.prisma.paymentIntent.findUnique({ where: { businessNo: originalNo } }) : null;

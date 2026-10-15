@@ -130,13 +130,17 @@ it('admits historical shipment exceptions after independent risks and blockers a
     h.prisma.orderHoldBlocker.update({ where: { id: blocker.id }, data: { resolvedAt: h.clock.now() } }),
     h.prisma.riskTask.update({ where: { id: shipmentRisk.id }, data: { status: 'RESOLVED' } }),
   ]);
+  // Task8 now registers a real return planner. Deliberately remove it only for
+  // this unsupported-composition assertion; real planning is covered by returns.
+  const returnPlanner = registry().get('RETURN_ORIGINALS');
+  registry().delete('RETURN_ORIGINALS');
   await post(one, `${f.path}/execute`, input, key).expect(503).expect(r => expect(r.body.code).toBe('RESOLUTION_EXECUTOR_UNAVAILABLE')); await unchanged();
   registerPlanner('RETURN_ORIGINALS');
   try {
     await post(one, `${f.path}/execute`, input, key).expect(200);
     expect(await counts(f)).toEqual({ approvals: 2, executions: 1, outbox: 1 });
     expect((await h.prisma.shipment.findFirstOrThrow({ where: { orderId: f.order.id } })).status).toBe('EXCEPTION');
-  } finally { registry().clear(); }
+  } finally { registry().clear(); if (returnPlanner) registry().set('RETURN_ORIGINALS', returnPlanner); }
 });
 
 it.each(['role', 'credential', 'account'] as const)('serializes non-executing approver %s revocation after execution commits', async kind => {

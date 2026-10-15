@@ -19,9 +19,10 @@ import { OperatorSecurityModule } from './operator-security/operator-security.mo
 import { AfterSalesModule } from './after-sales/after-sales.module.js';
 import { EvidenceModule } from './evidence/evidence.module.js';
 import { RiskModule } from './risk/risk.module.js';
+import { ReturnsModule } from './returns/returns.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule, AfterSalesModule, EvidenceModule, RiskModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule, AfterSalesModule, EvidenceModule, RiskModule, ReturnsModule],
   controllers: [HealthController],
   providers: [
     {
