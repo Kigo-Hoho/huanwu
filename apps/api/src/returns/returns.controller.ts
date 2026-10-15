@@ -8,11 +8,14 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { ReturnAddressService } from './return-address.service.js';
 import { ReturnCommandsService } from './return-commands.service.js';
+import { ReturnSimulationService, ReturnSimulationSchema, type ReturnSimulationInput } from './return-simulation.service.js';
 
 @Controller('after-sales/:id')
 @UseGuards(JwtAuthGuard, CustomerOnlyGuard)
 export class ReturnsController {
-  constructor(@Inject(ReturnAddressService) private readonly addresses: ReturnAddressService, @Inject(ReturnCommandsService) private readonly commands: ReturnCommandsService) {}
+  constructor(@Inject(ReturnAddressService) private readonly addresses: ReturnAddressService, @Inject(ReturnCommandsService) private readonly commands: ReturnCommandsService, @Inject(ReturnSimulationService) private readonly simulation: ReturnSimulationService) {}
+  @Post('returns/simulated-progress') @HttpCode(200)
+  simulate(@CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string, @Body(new ZodValidationPipe(ReturnSimulationSchema)) input: ReturnSimulationInput, @Headers('idempotency-key') key: string, @Res({ passthrough: true }) res: Response) { res.set('Cache-Control', 'no-store'); return this.simulation.progress({ actor, caseId: id.toLowerCase(), key }, input); }
   @Get('returns')
   list(@CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) { return this.commands.list(actor, id.toLowerCase()); }
   @Post('return-address') @HttpCode(200)
