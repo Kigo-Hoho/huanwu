@@ -143,6 +143,8 @@ it('pins the inclusive net compensation ceiling', () => {
 
 ### Task 7: 举报、交易冻结、单项下架与异常运单待办
 
+接口补充（2026-10-15）：管理端先通过 `GET /api/admin/risk/users/:id` 读取仅含 status/version/reason 的限制投影。两个既定 clear-block 路由采用独立 CLEAR_ITEM_RISK/CLEAR_ORDER_RISK grant，受信桌面 REVIEWER/SUPER_ADMIN；订单清除输入指定 blockerId，不能恢复订单或清除无关阻塞。新增枚举仅用追加迁移，不改既有迁移。客户自有冻结提示读入口留 Task12。
+
 **Files:** Create `apps/api/src/risk/{risk.module,risk.controller,admin-risk.controller,risk-report.service,trading-restrictions.service,risk-actions.service,risk-task.service}.ts`；Modify `apps/api/src/items/{items.service,public-items.service}.ts`、`apps/api/src/proposals/{proposals.service,proposal-order-handoff.service}.ts`、`apps/api/src/logistics/logistics-events.service.ts`；Test `apps/api/test/phase4/{risk-reports,trading-freeze-races}.e2e-spec.ts`。
 
 **Interfaces:** Produces `TradingRestrictionsService.lockAndAssert(tx, userIds: string[]): Promise<void>`、`RiskTaskService.recordInTransaction(tx, input): Promise<void>`；`RiskActionsService.freeze/unfreeze/unpublish/pause(context, resourceId, input, key): Promise<RiskCommandResult>`（Task1类型）。`activeBlockers(tx, orderId): Promise<RiskBlocker[]>` 供恢复服务使用。

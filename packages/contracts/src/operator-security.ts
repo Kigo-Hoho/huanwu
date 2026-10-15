@@ -3,7 +3,7 @@ const uuid = z.string().uuid().toLowerCase();
 const time = z.iso.datetime();
 export const OperatorCapabilitySchema = z.enum(['MOBILE_LIMITED', 'DESKTOP_PRIVILEGED']);
 export const OperatorDeviceStatusSchema = z.enum(['PENDING', 'APPROVED', 'REVOKED']);
-export const OperatorActionSchema = z.enum(['FREEZE_TRADING', 'UNFREEZE_TRADING', 'UNPUBLISH_ITEM', 'HOLD_ORDER', 'RESUME_ORDER', 'APPROVE_FUNDS', 'EXECUTE_FUNDS', 'ADJUDICATE_RESOLUTION', 'APPROVE_DEVICE', 'REVOKE_DEVICE']);
+export const OperatorActionSchema = z.enum(['FREEZE_TRADING', 'UNFREEZE_TRADING', 'UNPUBLISH_ITEM', 'HOLD_ORDER', 'CLEAR_ITEM_RISK', 'CLEAR_ORDER_RISK', 'RESUME_ORDER', 'APPROVE_FUNDS', 'EXECUTE_FUNDS', 'ADJUDICATE_RESOLUTION', 'APPROVE_DEVICE', 'REVOKE_DEVICE']);
 // This DTO carries references only. Actor, device and capability are rehydrated
 // by the API and cannot be supplied through a business command.
 export const OperatorActionContextSchema = z.strictObject({ sessionId: uuid, grantId: uuid });

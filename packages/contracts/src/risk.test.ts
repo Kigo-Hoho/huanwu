@@ -18,3 +18,12 @@ it('keeps reporter identity out of administrator report summaries', () => {
   expect(schema('RiskReportViewSchema').safeParse(view).success).toBe(true);
   expect(schema('AdminRiskReportViewSchema').safeParse({ ...view, reporterId: id }).success).toBe(false);
 });
+it('binds risk actions and conclusions to strict versioned commands and restoration grants', () => {
+  const command = { expectedVersion: 1, reason: '核验原因', operatorAction: { sessionId: id, grantId: id } };
+  expect(schema('RiskActionInputSchema').safeParse(command).success).toBe(true);
+  expect(schema('RiskActionInputSchema').safeParse({ ...command, status: 'ACTIVE' }).success).toBe(false);
+  expect(schema('ConcludeRiskReportSchema').safeParse({ expectedVersion: 1, reason: '核验结论', conclusion: 'ACTIONED' }).success).toBe(true);
+  expect(schema('ConcludeRiskReportSchema').safeParse({ expectedVersion: 1, reason: '', conclusion: 'OPEN' }).success).toBe(false);
+  expect(schema('OperatorActionSchema').safeParse('CLEAR_ITEM_RISK').success).toBe(true);
+  expect(schema('OperatorActionSchema').safeParse('CLEAR_ORDER_RISK').success).toBe(true);
+});

@@ -47,6 +47,7 @@ export class PublicItemsService {
     const items = await this.prisma.item.findMany({
       where: {
         status: 'ACTIVE',
+        owner: { OR: [{ tradingRestriction: null }, { tradingRestriction: { status: 'CLEAR' } }] },
         ...(cursor ? { OR: [
           { createdAt: { lt: new Date(cursor.createdAt) } },
           { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } },
@@ -67,7 +68,7 @@ export class PublicItemsService {
 
   async get(itemId: string): Promise<PublicItemView> {
     const item = await this.prisma.item.findFirst({
-      where: { id: itemId, status: 'ACTIVE' },
+      where: { id: itemId, status: 'ACTIVE', owner: { OR: [{ tradingRestriction: null }, { tradingRestriction: { status: 'CLEAR' } }] } },
       include: { images: true, reservation: true },
     });
     if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Item was not found' });

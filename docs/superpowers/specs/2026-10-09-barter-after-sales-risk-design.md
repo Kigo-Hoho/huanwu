@@ -112,6 +112,8 @@ CONTINUE_EXCHANGE 在风险解除、期限与订单状态安全恢复后允许�
 
 异常运单可信回调保留事实、暂停相应非终态订单并建立去重风险待办。终态订单仅追加异常事实/待办，不回退终态。运营可要求举证、查询原运单或批准具体退货/恢复方案，不可直接把 EXCEPTION 改成 DELIVERED。认定虚假运单需理由和证据，不只依据超时。
 
+Task7 接口澄清（2026-10-15）：风险写命令使用 `expectedVersion/reason/reportId?/operatorAction`，授权绑定 `{expectedVersion}` 与不含授权引用的完整业务正文；订单解除阻塞另需 `blockerId`。`GET /api/admin/risk/users/:id` 仅向当前绑定的 REVIEWER/SUPER_ADMIN 返回 `status/version/reason`，未建立基线时为 CLEAR/1/null，不返回账号资料。`clear-block` 使用独立 CLEAR_ITEM_RISK/CLEAR_ORDER_RISK 授权，要求受信桌面和风控角色；只解除能够证明来源的对应风险任务/阻塞，保留其他工单、物流或资金阻塞，订单不恢复。物品解除风险后仍 INACTIVE，原物主必须编辑为 DRAFT、提交并重新审核。举报处理只认领、要求补证或记录结论，不能以结论自动解除这些独立限制；详情和管理列表均不返回举报者/上传者身份。
+
 ## 9. 角色、设备会话与高风险审批
 
 CUSTOMER：自己的工单、证据、方案确认、补偿支付和退货；没有运营权限。

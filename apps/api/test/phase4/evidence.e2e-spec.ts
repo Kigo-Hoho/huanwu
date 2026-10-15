@@ -183,7 +183,7 @@ it('rejects forged MIME, truncated images and oversized files before any metadat
   expect(await rows(value.case.id)).toHaveLength(1);
 });
 
-it('keeps report evidence private to its author and bound risk operators without publishing report routes', async () => {
+it('keeps report evidence private to its author and bound risk operators through report readers', async () => {
   const report = await h.prisma.riskReport.create({ data: { reporterId: h.actors.initiator.id, targetType: 'ITEM', targetId: randomUUID(), reason: 'OTHER', description: '举报附件隔离夹具' } });
   const service = h.app.get(EvidenceService);
   const key = randomUUID();
@@ -205,7 +205,10 @@ it('keeps report evidence private to its author and bound risk operators without
   expect(serialized).not.toContain(evidence.originalKey);
   expect(serialized).not.toContain(evidence.displayKey);
   expect(await h.prisma.caseEvidence.count({ where: { reportId: report.id } })).toBe(1);
-  await h.get(h.actors.initiator, `/api/reports/${report.id}`).expect(404);
+  const detail = await h.get(h.actors.initiator, `/api/reports/${report.id}`).expect(200);
+  expect(detail.body.evidence).toHaveLength(1);
+  expect(JSON.stringify(detail.body)).not.toMatch(/reporterId|uploaderId|originalKey|displayKey/);
+  await h.get(h.actors.recipient, `/api/reports/${report.id}`).expect(404);
 });
 
 it('rolls back report append audit failures and enforces report quota under racing versions', async () => {

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { OperatorActionContextSchema } from './operator-security.js';
+import { AdminEvidenceViewSchema } from './evidence.js';
 const uuid = z.string().uuid().toLowerCase();
 const version = z.number().int().positive();
 const time = z.iso.datetime();
@@ -15,6 +17,18 @@ export const RiskReportViewSchema = z.strictObject({ id: uuid, ...report, status
 export const AdminRiskReportViewSchema = RiskReportViewSchema;
 export const RiskReportListViewSchema = z.strictObject({ items: z.array(RiskReportViewSchema), nextCursor: z.string().nullable() });
 export const TradingRestrictionViewSchema = z.strictObject({ status: TradingRestrictionStatusSchema, version, reason: z.string().nullable() });
+export const RiskReportCommandSchema = z.strictObject({ expectedVersion: version, reason: z.string().trim().min(1).max(2000) });
+export const ConcludeRiskReportSchema = RiskReportCommandSchema.extend({ conclusion: z.enum(['ACTIONED', 'DISMISSED']) });
+export const RiskActionInputSchema = RiskReportCommandSchema.extend({ reportId: uuid.optional(), operatorAction: OperatorActionContextSchema });
+export const ClearOrderRiskInputSchema = RiskActionInputSchema.extend({ blockerId: uuid });
+export const RiskRecordViewSchema = z.strictObject({ id: uuid, action: z.string(), reason: z.string(), createdAt: time });
+export const RiskReportDetailSchema = RiskReportViewSchema.extend({ evidence: z.array(AdminEvidenceViewSchema), records: z.array(RiskRecordViewSchema) });
+export const RiskTaskViewSchema = z.strictObject({ id: uuid, orderId: uuid.nullable(), caseId: uuid.nullable(), reportId: uuid.nullable(), kind: z.string(), description: z.string(), status: RiskTaskStatusSchema, createdAt: time, updatedAt: time });
+export const RiskTaskListViewSchema = z.strictObject({ items: z.array(RiskTaskViewSchema), nextCursor: z.string().nullable() });
+export type RiskReportCommand = z.infer<typeof RiskReportCommandSchema>;
+export type ConcludeRiskReportInput = z.infer<typeof ConcludeRiskReportSchema>;
+export type RiskActionInput = z.infer<typeof RiskActionInputSchema>;
+export type ClearOrderRiskInput = z.infer<typeof ClearOrderRiskInputSchema>;
 export type RiskReportStatus = z.infer<typeof RiskReportStatusSchema>;
 export type RiskTargetType = z.infer<typeof RiskTargetTypeSchema>;
 export type RiskReason = z.infer<typeof RiskReasonSchema>;

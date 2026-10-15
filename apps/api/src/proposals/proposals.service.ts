@@ -8,6 +8,7 @@ import { mapProposal, proposalInclude } from './proposal.mapper.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { reservationIsAvailable } from '../reservations/reservation-policy.js';
 import { ReservationsService } from '../reservations/reservations.service.js';
+import { TradingRestrictionsService } from '../risk/trading-restrictions.service.js';
 
 const commandName = 'CREATE_PROPOSAL';
 const pendingLifetimeMs = 7 * 24 * 60 * 60 * 1000;
@@ -43,6 +44,7 @@ export class ProposalsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ReservationsService) private readonly reservations: ReservationsService,
+    @Inject(TradingRestrictionsService) private readonly restrictions: TradingRestrictionsService,
   ) {}
 
   async expire(id: string): Promise<boolean> {
@@ -82,6 +84,9 @@ export class ProposalsService {
     const where = { actorId_commandName_key: identity };
     try {
       return await this.prisma.$transaction(async tx => {
+        const located = await tx.item.findUnique({ where: { id: input.targetItemId }, select: { ownerId: true } });
+        if (!located) throw unavailable();
+        await this.restrictions.lockAndAssert(tx, [actorId, located.ownerId]);
         const previous = await tx.idempotencyRecord.findUnique({ where });
         if (previous) return replay(previous, requestHash);
         // Claim the key before business writes: concurrent retries wait on its unique constraint.
@@ -160,6 +165,9 @@ export class ProposalsService {
     const where = { actorId_commandName_key: identity };
     try {
       return await this.prisma.$transaction(async tx => {
+        const located = await tx.proposal.findUnique({ where: { id }, select: { initiatorId: true, recipientId: true } });
+        if (!located || ![located.initiatorId, located.recipientId].includes(actorId)) throw new NotFoundException({ code: 'PROPOSAL_NOT_FOUND', message: 'Proposal was not found' });
+        if (action === 'counter' || action === 'accept') await this.restrictions.lockAndAssert(tx, [located.initiatorId, located.recipientId]);
         // All transitions lock the proposal before rereading it. Version and turn checks
         // therefore see the preceding committed command, including concurrent counters.
         await tx.$queryRaw`SELECT "id" FROM "Proposal" WHERE "id" = ${id}::uuid FOR UPDATE`;

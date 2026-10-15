@@ -113,7 +113,8 @@ async function mutationState(pid: number, finished: () => boolean) {
 it('admits historical shipment exceptions after independent risks and blockers are cleared without rewriting shipment facts', async () => {
   const f = await fixture({ returnOriginals: true }); await approve(f, one); await approve(f, two);
   const risk = await h.prisma.riskTask.create({ data: { orderId: f.order.id, kind: 'LOGISTICS_EXCEPTION', sourceKey: randomUUID(), description: '独立物流核验' } });
-  const blocker = await h.prisma.orderHoldBlocker.findUniqueOrThrow({ where: { orderId_kind_sourceId: { orderId: f.order.id, kind: 'RISK', sourceId: 'hold:LOGISTICS_EXCEPTION' } } });
+  const shipmentRisk = await h.prisma.riskTask.findFirstOrThrow({ where: { orderId: f.order.id, kind: 'SHIPMENT_EXCEPTION' } });
+  const blocker = await h.prisma.orderHoldBlocker.findUniqueOrThrow({ where: { orderId_kind_sourceId: { orderId: f.order.id, kind: 'RISK', sourceId: shipmentRisk.id } } });
   const input = await authorized(f, one, 'EXECUTE_FUNDS'); const key = randomUUID();
   const unchanged = async () => {
     expect(await counts(f)).toEqual({ approvals: 2, executions: 0, outbox: 0 });
@@ -125,7 +126,10 @@ it('admits historical shipment exceptions after independent risks and blockers a
   await post(one, `${f.path}/execute`, input, key).expect(409).expect(r => expect(r.body.code).toBe('RISK_BLOCKS_RESUME')); await unchanged();
   await h.prisma.riskTask.update({ where: { id: risk.id }, data: { status: 'RESOLVED' } });
   await post(one, `${f.path}/execute`, input, key).expect(409).expect(r => expect(r.body.code).toBe('RISK_BLOCKS_RESUME')); await unchanged();
-  await h.prisma.orderHoldBlocker.update({ where: { id: blocker.id }, data: { resolvedAt: h.clock.now() } });
+  await h.prisma.$transaction([
+    h.prisma.orderHoldBlocker.update({ where: { id: blocker.id }, data: { resolvedAt: h.clock.now() } }),
+    h.prisma.riskTask.update({ where: { id: shipmentRisk.id }, data: { status: 'RESOLVED' } }),
+  ]);
   await post(one, `${f.path}/execute`, input, key).expect(503).expect(r => expect(r.body.code).toBe('RESOLUTION_EXECUTOR_UNAVAILABLE')); await unchanged();
   registerPlanner('RETURN_ORIGINALS');
   try {

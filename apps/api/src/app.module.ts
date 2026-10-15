@@ -18,9 +18,10 @@ import { TestingLogisticsController } from './integrations/testing-logistics.con
 import { OperatorSecurityModule } from './operator-security/operator-security.module.js';
 import { AfterSalesModule } from './after-sales/after-sales.module.js';
 import { EvidenceModule } from './evidence/evidence.module.js';
+import { RiskModule } from './risk/risk.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule, AfterSalesModule, EvidenceModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule, AfterSalesModule, EvidenceModule, RiskModule],
   controllers: [HealthController],
   providers: [
     {

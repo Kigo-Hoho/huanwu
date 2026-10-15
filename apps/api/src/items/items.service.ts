@@ -15,6 +15,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { mapItem } from './item.mapper.js';
+import { TradingRestrictionsService } from '../risk/trading-restrictions.service.js';
 
 type CreateItemInput = z.infer<typeof CreateItemSchema>;
 type UpdateItemInput = z.infer<typeof UpdateItemSchema>;
@@ -48,10 +49,13 @@ export class ItemsService {
     private readonly prisma: PrismaService,
     @Inject(AuditService)
     private readonly auditService: AuditService,
+    @Inject(TradingRestrictionsService) private readonly restrictions: TradingRestrictionsService,
   ) {}
 
   async create(ownerId: string, input: CreateItemInput): Promise<ItemView> {
-    const item = await this.prisma.item.create({
+    const item = await this.prisma.$transaction(async tx => {
+      await this.restrictions.lockAndAssert(tx, [ownerId]);
+      return tx.item.create({
       data: {
         ownerId,
         title: input.title,
@@ -64,6 +68,7 @@ export class ItemsService {
         },
       },
       include: { images: true },
+      });
     });
     return mapItem(item);
   }
@@ -74,11 +79,14 @@ export class ItemsService {
     input: UpdateItemInput,
   ): Promise<ItemView> {
     return await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Item" WHERE id = ${itemId}::uuid FOR UPDATE`;
       const existing = await tx.item.findFirst({
         where: { id: itemId, ownerId },
       });
       if (!existing) throw itemNotFound();
-      if (existing.status !== 'DRAFT' && existing.status !== 'REJECTED') {
+      await this.restrictions.assertItemClear(tx, itemId);
+      const clearedRisk = existing.status === 'INACTIVE' && Boolean(await tx.riskTask.findFirst({ where: { sourceKey: `item:${itemId}`, kind: 'ITEM_UNPUBLISHED', status: 'RESOLVED' } }));
+      if (existing.status !== 'DRAFT' && existing.status !== 'REJECTED' && !clearedRisk) {
         throw invalidState('Only draft or rejected items can be edited');
       }
 
@@ -86,7 +94,7 @@ export class ItemsService {
         where: {
           id: itemId,
           ownerId,
-          status: { in: ['DRAFT', 'REJECTED'] },
+          status: existing.status,
           version: existing.version,
         },
         data: {
@@ -95,7 +103,7 @@ export class ItemsService {
           referenceValueFen: input.referenceValueFen,
           condition: input.condition,
           wantedText: input.wantedText,
-          status: existing.status === 'REJECTED' ? 'DRAFT' : undefined,
+          status: existing.status === 'REJECTED' || clearedRisk ? 'DRAFT' : undefined,
           rejectReason: existing.status === 'REJECTED' ? null : undefined,
           version: { increment: 1 },
         },
@@ -153,6 +161,8 @@ export class ItemsService {
   ): Promise<ItemView> {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await this.restrictions.lockAndAssert(tx, [ownerId]);
+        await tx.$queryRaw`SELECT id FROM "Item" WHERE id = ${itemId}::uuid FOR UPDATE`;
         const previous = await tx.idempotencyRecord.findUnique({
           where: {
             actorId_commandName_key: {
@@ -178,6 +188,7 @@ export class ItemsService {
           include: { images: true },
         });
         if (!existing) throw itemNotFound();
+        await this.restrictions.assertItemClear(tx, itemId);
         if (existing.status !== 'DRAFT') {
           throw invalidState('Only draft items can be submitted');
         }

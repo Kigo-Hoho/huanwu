@@ -151,7 +151,8 @@ it('hands the exact full lease set to an order in place and never frees it throu
   let now = new Date('2026-10-02T00:00:00Z');
   const clock = { now: () => now };
   const reservations = new ReservationsService(clock);
-  const proposals = new ProposalsService(prisma, new AuditService(), clock, reservations);
+  const { TradingRestrictionsService } = await import('../../src/risk/trading-restrictions.service.js');
+  const proposals = new ProposalsService(prisma, new AuditService(), clock, reservations, new TradingRestrictionsService());
   const publicItems = new PublicItemsService(prisma, clock);
   const offer = { offeredItemIds: [item], targetItemId: second, differenceFen: 0, payer: 'NONE' as const, deliveryMode: 'IN_PERSON' as const, initiatorShippingFen: 0, recipientShippingFen: 0 };
   try {

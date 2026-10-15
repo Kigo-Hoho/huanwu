@@ -133,7 +133,7 @@ it('refuses a cancelled order once its original payment was fully refunded throu
 });
 it('keeps frozen participants able to create, respond and close an otherwise safe case', async () => {
   const order = await h.prepareOrder();
-  await h.prisma.tradingRestriction.create({ data: { userId: h.actors.initiator.id, status: 'FROZEN', reason: '其他交易待核验' } });
+  await h.prisma.tradingRestriction.update({ where: { userId: h.actors.initiator.id }, data: { status: 'FROZEN', reason: '其他交易待核验' } });
   try {
     const opened = (await open(order).expect(201)).body;
     const path = `/api/after-sales/${opened.case.id}`;
