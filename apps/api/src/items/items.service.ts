@@ -10,10 +10,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { z } from 'zod';
+import { createHash } from 'node:crypto';
 
 import { AuditService } from '../audit/audit.service.js';
 import { PrismaService } from '../database/prisma.service.js';
-import type { Prisma } from '../generated/prisma/client.js';
+import type { IdempotencyRecord, Prisma } from '../generated/prisma/client.js';
 import { mapItem } from './item.mapper.js';
 import { TradingRestrictionsService } from '../risk/trading-restrictions.service.js';
 
@@ -159,10 +160,19 @@ export class ItemsService {
     idempotencyKey: string,
     requestId?: string,
   ): Promise<ItemView> {
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        await this.restrictions.lockAndAssert(tx, [ownerId]);
+    const requestHash = createHash('sha256').update(itemId.toLowerCase()).digest('hex');
+    const replay = (previous: IdempotencyRecord): ItemView => {
+      const saved = previous.response as unknown as ItemView;
+      // Phase1 records have a null hash; their immutable saved resource still
+      // binds the command. Never replay one owned item's key onto another item.
+      if (saved.id?.toLowerCase() !== itemId.toLowerCase() || (previous.requestHash !== null && previous.requestHash !== requestHash)) throw new ConflictException({ code: 'IDEMPOTENCY_CONFLICT', message: 'Idempotency key was used with different content' });
+      return saved;
+    };
+    const run = async (tx: Prisma.TransactionClient) => {
+        await this.restrictions.lock(tx, [ownerId]);
         await tx.$queryRaw`SELECT id FROM "Item" WHERE id = ${itemId}::uuid FOR UPDATE`;
+        const existing = await tx.item.findFirst({ where: { id: itemId, ownerId }, include: { images: true } });
+        if (!existing) throw itemNotFound();
         const previous = await tx.idempotencyRecord.findUnique({
           where: {
             actorId_commandName_key: {
@@ -172,22 +182,19 @@ export class ItemsService {
             },
           },
         });
-        if (previous) return previous.response as unknown as ItemView;
+        if (previous) return replay(previous);
+        await this.restrictions.assertAllowed(tx, [ownerId]);
 
         await tx.idempotencyRecord.create({
           data: {
             actorId: ownerId,
             commandName: submitCommandName,
             key: idempotencyKey,
+            requestHash,
             response: {},
           },
         });
 
-        const existing = await tx.item.findFirst({
-          where: { id: itemId, ownerId },
-          include: { images: true },
-        });
-        if (!existing) throw itemNotFound();
         await this.restrictions.assertItemClear(tx, itemId);
         if (existing.status !== 'DRAFT') {
           throw invalidState('Only draft items can be submitted');
@@ -228,20 +235,13 @@ export class ItemsService {
           data: { response: response as unknown as Prisma.InputJsonValue },
         });
         return response;
-      });
+    };
+    try {
+      return await this.prisma.$transaction(run);
     } catch (error: unknown) {
       if (!isUniqueConstraintError(error)) throw error;
-      const previous = await this.prisma.idempotencyRecord.findUnique({
-        where: {
-          actorId_commandName_key: {
-            actorId: ownerId,
-            commandName: submitCommandName,
-            key: idempotencyKey,
-          },
-        },
-      });
-      if (!previous) throw error;
-      return previous.response as unknown as ItemView;
+      // Re-enter ownership/locking/replay together after a unique-key race.
+      return this.prisma.$transaction(run);
     }
   }
 }

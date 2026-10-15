@@ -86,7 +86,7 @@ export class ProposalsService {
       return await this.prisma.$transaction(async tx => {
         const located = await tx.item.findUnique({ where: { id: input.targetItemId }, select: { ownerId: true } });
         if (!located) throw unavailable();
-        await this.restrictions.lockAndAssert(tx, [actorId, located.ownerId]);
+        await this.restrictions.lock(tx, [actorId, located.ownerId]);
         const previous = await tx.idempotencyRecord.findUnique({ where });
         if (previous) return replay(previous, requestHash);
         // Claim the key before business writes: concurrent retries wait on its unique constraint.
@@ -101,7 +101,11 @@ export class ProposalsService {
           include: { images: { orderBy: { sortOrder: 'asc' } }, reservation: true },
         });
         const target = items.find(item => item.id === input.targetItemId);
-        if (!target || target.ownerId === actorId || items.length !== itemIds.length) throw unavailable();
+        if (!target || target.status !== 'ACTIVE' || target.ownerId === actorId || target.ownerId !== located.ownerId || items.length !== itemIds.length) throw unavailable();
+        if (await tx.tradingRestriction.count({ where: { userId: target.ownerId, status: 'FROZEN' } })) throw unavailable();
+        // Only a currently public target may reach the caller's own admission
+        // error. Hidden/frozen-owner targets all have the same unavailable view.
+        await this.restrictions.assertAllowed(tx, [actorId]);
         for (const item of items) {
           if (item.status !== 'ACTIVE' || !reservationIsAvailable(item.reservation, now) ||
               (item.id !== target.id && item.ownerId !== actorId)) throw unavailable();
@@ -167,7 +171,7 @@ export class ProposalsService {
       return await this.prisma.$transaction(async tx => {
         const located = await tx.proposal.findUnique({ where: { id }, select: { initiatorId: true, recipientId: true } });
         if (!located || ![located.initiatorId, located.recipientId].includes(actorId)) throw new NotFoundException({ code: 'PROPOSAL_NOT_FOUND', message: 'Proposal was not found' });
-        if (action === 'counter' || action === 'accept') await this.restrictions.lockAndAssert(tx, [located.initiatorId, located.recipientId]);
+        if (action === 'counter' || action === 'accept') await this.restrictions.lock(tx, [located.initiatorId, located.recipientId]);
         // All transitions lock the proposal before rereading it. Version and turn checks
         // therefore see the preceding committed command, including concurrent counters.
         await tx.$queryRaw`SELECT "id" FROM "Proposal" WHERE "id" = ${id}::uuid FOR UPDATE`;
@@ -177,6 +181,7 @@ export class ProposalsService {
         }
         const previous = await tx.idempotencyRecord.findUnique({ where });
         if (previous) return replay(previous, requestHash);
+        if (action === 'counter' || action === 'accept') await this.restrictions.assertAllowed(tx, [proposal.initiatorId, proposal.recipientId]);
         await tx.idempotencyRecord.create({ data: { ...identity, requestHash, response: {} } });
         if (proposal.status === 'EXPIRED') throw new ConflictException({ code: 'PROPOSAL_EXPIRED', message: 'Proposal has expired' });
         const now = this.clock.now();

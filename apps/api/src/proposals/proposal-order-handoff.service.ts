@@ -28,7 +28,7 @@ export class ProposalOrderHandoffService {
   async lockParticipants(tx: Prisma.TransactionClient, actorId: string, proposalId: string): Promise<void> {
     const located = await tx.proposal.findUnique({ where: { id: proposalId }, include: proposalInclude });
     assertProposalParticipant(located, actorId);
-    await this.restrictions.lockAndAssert(tx, [located.initiatorId, located.recipientId]);
+    await this.restrictions.lock(tx, [located.initiatorId, located.recipientId]);
   }
 
   async prepare(tx: Prisma.TransactionClient, actorId: string, proposalId: string, expectedVersion: number, now: Date): Promise<ConfirmedOffer> {
@@ -37,6 +37,7 @@ export class ProposalOrderHandoffService {
     await tx.$queryRaw`SELECT "id" FROM "Proposal" WHERE "id" = ${proposalId}::uuid FOR UPDATE`;
     const proposal = await tx.proposal.findUnique({ where: { id: proposalId }, include: proposalInclude });
     assertProposalParticipant(proposal, actorId);
+    await this.restrictions.assertAllowed(tx, [proposal.initiatorId, proposal.recipientId]);
     if (proposal.status === 'CONVERTED') throw new ConflictException({ code: 'PROPOSAL_ALREADY_CONVERTED', message: 'Proposal already has an order', orderId: proposal.order?.id ?? null });
     const lockedNow = new Date(Math.max(now.getTime(), this.clock.now().getTime()));
     if (proposal.status === 'EXPIRED' || (proposal.status === 'CONFIRMED' && proposal.reservationExpiresAt && proposal.reservationExpiresAt <= lockedNow)) throw expired();

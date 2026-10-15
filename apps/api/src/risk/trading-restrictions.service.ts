@@ -13,6 +13,11 @@ export class TradingRestrictionsService {
   }
   async lockAndAssert(tx: Prisma.TransactionClient, userIds: string[]): Promise<void> {
     await this.lock(tx, userIds);
+    await this.assertAllowed(tx, userIds);
+  }
+  // Callers already hold these restriction rows. Saved-command recovery is not
+  // new admission and must be checked before calling this assertion.
+  async assertAllowed(tx: Prisma.TransactionClient, userIds: string[]): Promise<void> {
     if (await tx.tradingRestriction.count({ where: { userId: { in: userIds }, status: 'FROZEN' } })) {
       throw new ConflictException({ code: 'TRADING_FROZEN', message: 'New trading is restricted; existing records and after-sales remain available' });
     }

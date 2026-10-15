@@ -84,6 +84,7 @@ export class RiskActionsService {
           await this.hold.enter(tx, order, input.reason, now, { kind: 'RISK', sourceId: task.id });
           details = { taskId: task.id };
         } else {
+          if (['COMPLETED', 'CANCELLED'].includes(order.status)) throw new ConflictException('Terminal order risks require independent review');
           const blockerId = (input as ClearOrderRiskInput).blockerId;
           const blocker = await tx.orderHoldBlocker.findFirst({ where: { id: blockerId, orderId: id, kind: 'RISK', resolvedAt: null } });
           if (!blocker) throw new ConflictException('No eligible order risk blocker');

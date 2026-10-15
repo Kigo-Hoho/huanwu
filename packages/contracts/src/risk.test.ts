@@ -27,3 +27,10 @@ it('binds risk actions and conclusions to strict versioned commands and restorat
   expect(schema('OperatorActionSchema').safeParse('CLEAR_ITEM_RISK').success).toBe(true);
   expect(schema('OperatorActionSchema').safeParse('CLEAR_ORDER_RISK').success).toBe(true);
 });
+it('exposes only a nullable authorized blocker reference on risk task projections', () => {
+  const task = { id, orderId: id, caseId: null, reportId: null, kind: 'OPERATOR_ORDER_PAUSE', description: '核验', status: 'OPEN', createdAt: '2026-10-09T00:00:00.000Z', updatedAt: '2026-10-09T00:00:00.000Z' };
+  expect(schema('RiskTaskViewSchema').safeParse({ ...task, blockerId: id }).success).toBe(true);
+  expect(schema('RiskTaskViewSchema').safeParse({ ...task, blockerId: null }).success).toBe(true);
+  expect(schema('RiskTaskViewSchema').safeParse({ ...task, blockerId: 'hold:legacy' }).success).toBe(false);
+  expect(schema('RiskTaskViewSchema').safeParse({ ...task, blockerId: id, sourceKey: 'private' }).success).toBe(false);
+});

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ItemsService } from './items.service.js';
 import { TradingRestrictionsService } from '../risk/trading-restrictions.service.js';
-const restrictions = { lockAndAssert: async () => {}, assertItemClear: async () => {} } as unknown as TradingRestrictionsService;
+const restrictions = { lockAndAssert: async () => {}, lock: async () => {}, assertAllowed: async () => {}, assertItemClear: async () => {} } as unknown as TradingRestrictionsService;
 
 describe('ItemsService', () => {
   it('maps database dates to UTC ISO strings after creating a draft', async () => {

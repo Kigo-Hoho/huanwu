@@ -130,10 +130,14 @@ export class RiskReportService {
     return this.prisma.$transaction(async tx => {
       await this.authorize(tx, context);
       const rows = await tx.riskTask.findMany({ where: { ...after, ...(id ? { id } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: id ? 1 : limit + 1 });
-      const map = (value: typeof rows[number]) => { const { id, orderId, caseId, reportId, kind, description, status, createdAt, updatedAt } = value; return { id, orderId, caseId, reportId, kind, description, status, createdAt: createdAt.toISOString(), updatedAt: updatedAt.toISOString() }; };
+      const eligibleIds = rows.filter(row => row.orderId && row.status !== 'RESOLVED' && ['OPERATOR_ORDER_PAUSE', 'SHIPMENT_EXCEPTION'].includes(row.kind)).map(row => row.id);
+      // Page-bounded lookup; only the exact task/order provenance is actionable.
+      // Terminal tasks and unrelated/closed blockers cannot supply a command ID.
+      const blockers = eligibleIds.length ? await tx.orderHoldBlocker.findMany({ where: { kind: 'RISK', sourceId: { in: eligibleIds }, resolvedAt: null, order: { status: { notIn: ['COMPLETED', 'CANCELLED'] } } }, select: { id: true, orderId: true, sourceId: true } }) : [];
+      const map = (value: typeof rows[number]) => { const { id, orderId, caseId, reportId, kind, description, status, createdAt, updatedAt } = value; const blockerId = blockers.find(blocker => blocker.sourceId === id && blocker.orderId === orderId)?.id ?? null; return { id, orderId, caseId, reportId, blockerId, kind, description, status, createdAt: createdAt.toISOString(), updatedAt: updatedAt.toISOString() }; };
       if (id) { if (!rows[0]) throw missingReport(); return RiskTaskViewSchema.parse(map(rows[0])); }
       return RiskTaskListViewSchema.parse({ items: rows.slice(0, limit).map(map), nextCursor: nextCursor(rows, limit) });
-    });
+    }, { isolationLevel: 'RepeatableRead' });
   }
   async restriction(context: OperatorSessionContext, id: string) {
     return this.prisma.$transaction(async tx => {
