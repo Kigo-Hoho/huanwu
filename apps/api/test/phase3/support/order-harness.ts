@@ -13,6 +13,7 @@ import { configureApp } from '../../../src/main.js';
 import { ProposalExpiryScheduler } from '../../../src/proposals/proposal-expiry.scheduler.js';
 import { OrderExpiryScheduler } from '../../../src/orders/order-expiry.scheduler.js';
 import { OutboxWorker } from '../../../src/integrations/outbox.worker.js';
+import { ReturnEventReconciler } from '../../../src/returns/return-event-reconciler.js';
 import { createPhase3Database } from './database-fixtures.js';
 
 export class MutableClock implements Clock {
@@ -46,6 +47,7 @@ export async function createOrderHarness() {
     .overrideProvider(PrismaService).useValue(prisma)
     .overrideProvider(CLOCK).useValue(clock)
     .overrideProvider(OutboxWorker).useValue({})
+    .overrideProvider(ReturnEventReconciler).useValue({})
     .overrideProvider(OrderExpiryScheduler).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
   app = module.createNestApplication();

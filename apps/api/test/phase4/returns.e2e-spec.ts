@@ -15,6 +15,14 @@ import { LogisticsEventsService } from '../../src/logistics/logistics-events.ser
 import request from 'supertest';
 import { INTEGRATION_CONFIG, type IntegrationConfiguration } from '../../src/integrations/integration-config.js';
 import { selectIntegration } from '../../src/integrations/integration-config.js';
+import { Test } from '@nestjs/testing';
+import { AppModule } from '../../src/app.module.js';
+import { configureApp } from '../../src/main.js';
+import { LocalImageStorageAdapter } from '../../src/storage/local-image-storage.adapter.js';
+import { ProposalExpiryScheduler } from '../../src/proposals/proposal-expiry.scheduler.js';
+import { OrderExpiryScheduler } from '../../src/orders/order-expiry.scheduler.js';
+import { ReturnEventReconciler } from '../../src/returns/return-event-reconciler.js';
+import { ReturnEventsService } from '../../src/returns/return-events.service.js';
 
 let h: AfterSalesHarness;
 beforeAll(async () => { h = await createAfterSalesHarness(); });
@@ -102,6 +110,113 @@ async function deferOtherCommands() {
 async function simulate(f: Fixture, actor: AuthenticatedUser, shipmentId: string, fact: object, key = randomUUID(), input?: object) {
   return h.command(actor, `/api/after-sales/${f.caseId}/returns/simulated-progress`, input ?? { ...await refresh(f), shipmentId, ...fact }, key);
 }
+it.each(['committed', 'pending', 'client-replay'] as const)('recovers accepted delivery A after failed final audit and later accepted exception B (%s) without losing either fact', async delivery => {
+  await deferOtherCommands();
+  const f = await fixture({ count: 1, delivered: ['INITIATOR'] }); await ready(f); await closeOriginals(f); await deferOtherCommands(); await (await parcel(f)).expect(200);
+  const worker = new OutboxWorker(h.prisma, h.clock, h.app.get(OutboxHandlerRegistry));
+  try {
+    await worker.tick();
+    const op = await h.prisma.outboxCommand.findFirstOrThrow({ where: { orderId: f.order.id, kind: 'VERIFY_RETURN' } });
+    const shipmentId = (op.payload as { shipmentId: string }).shipmentId;
+    expect((await simulate(f, h.actors.recipient, shipmentId, { kind: 'RETURN_PROGRESS', progress: 'COLLECTED' })).status).toBe(200);
+    h.clock.advance(30000); await worker.tick();
+    expect((await h.prisma.outboxCommand.findUniqueOrThrow({ where: { id: op.id } })).status).toBe('SUCCEEDED');
+    const input = { ...await refresh(f), shipmentId, kind: 'RETURN_PROGRESS', progress: 'DELIVERED' }; const key = randomUUID();
+    h.faultAuditActionAfterInsertOnce('RETURN_PROVIDER_FACT_RECORDED', async tx => { expect((await tx.returnShipment.findUniqueOrThrow({ where: { id: shipmentId } })).deliveredAt).not.toBeNull(); });
+    expect((await simulate(f, h.actors.recipient, shipmentId, {}, key, input)).status).toBe(500);
+    expect((await h.prisma.returnShipment.findUniqueOrThrow({ where: { id: shipmentId } })).deliveredAt).toBeNull();
+    vi.restoreAllMocks();
+    if (delivery === 'pending') h.faultAuditActionAfterInsertOnce('RETURN_PROVIDER_FACT_RECORDED', async tx => { expect(await tx.riskTask.count({ where: { caseId: f.caseId, kind: 'RETURN_EXCEPTION' } })).toBe(1); });
+    expect((await simulate(f, h.actors.recipient, shipmentId, { kind: 'RETURN_PROGRESS', progress: 'EXCEPTION' })).status).toBe(delivery === 'pending' ? 500 : 200);
+    vi.restoreAllMocks();
+    if (delivery === 'client-replay') expect((await simulate(f, h.actors.recipient, shipmentId, {}, key, input)).status).toBe(200);
+    // Two independent consumers after a restart, with no client replay of A.
+    const fresh = () => new ReturnEventReconciler(h.prisma, h.app.get(ReturnEventsService), h.app.get(INTEGRATION_CONFIG));
+    const first = fresh(); const second = fresh();
+    try { await Promise.all([first.tick(), second.tick()]); } finally { await first.onModuleDestroy(); await second.onModuleDestroy(); }
+    const beforeReplay = await refresh(f);
+    expect((await simulate(f, h.actors.recipient, shipmentId, {}, key, input)).status).toBe(200);
+    expect(await refresh(f)).toEqual(beforeReplay);
+    expect((await h.prisma.returnShipment.findUniqueOrThrow({ where: { id: shipmentId } })).deliveredAt).not.toBeNull();
+    expect((await obligations(f))[0].progress).toMatchObject({ status: 'DISPUTED', confirmedAt: null });
+    expect(await h.prisma.returnEvent.count({ where: { shipmentId, kind: 'DELIVERED' } })).toBe(1);
+    expect(await h.prisma.returnEvent.count({ where: { shipmentId, kind: 'EXCEPTION' } })).toBe(1);
+    expect(await h.prisma.riskTask.count({ where: { caseId: f.caseId, kind: 'RETURN_EXCEPTION' } })).toBe(1);
+    expect(await h.prisma.simulatedProviderOperation.count({ where: { businessNo: op.businessNo } })).toBe(1);
+    expect(await h.prisma.outboxCommand.count({ where: { businessNo: op.businessNo } })).toBe(1);
+    expect(await h.app.get(SimulatedProviderStore).query(op.businessNo)).toMatchObject({ status: 'SUCCESS', event: { progress: 'EXCEPTION' } });
+    const accepted = await h.prisma.simulatedProviderEvent.findMany({ where: { businessNo: op.businessNo }, orderBy: { id: 'asc' } });
+    expect(accepted.map(e => (e.payload as { progress: string }).progress)).toEqual(['COLLECTED', 'DELIVERED', 'EXCEPTION']);
+    for (const event of accepted) {
+      const applied = await h.prisma.integrationEvent.findUniqueOrThrow({ where: { provider_eventId: { provider: event.provider, eventId: event.eventId } }, include: { receipt: true } });
+      expect(applied.receipt?.status).toBe('PROCESSED');
+      expect(await h.prisma.auditLog.count({ where: { action: 'RETURN_PROVIDER_FACT_RECORDED', entityId: applied.id } })).toBe(1);
+    }
+  } finally { await worker.onModuleDestroy(); }
+});
+it.each(['disabled', 'production', 'static'] as const)('omits the return simulator route in %s composition', async mode => {
+  const previous = { NODE_ENV: process.env.NODE_ENV, LOGISTICS_PROVIDER: process.env.LOGISTICS_PROVIDER, PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER, WECHAT_IDENTITY_PROVIDER: process.env.WECHAT_IDENTITY_PROVIDER };
+  process.env.NODE_ENV = mode === 'production' ? 'production' : 'test'; process.env.LOGISTICS_PROVIDER = mode === 'static' ? 'simulated' : 'disabled'; process.env.PAYMENT_PROVIDER = 'disabled'; process.env.WECHAT_IDENTITY_PROVIDER = 'wechat';
+  try {
+    const module = await Test.createTestingModule({ imports: [mode === 'static' ? AppModule : AppModule.forEnvironment()] }).overrideProvider(LocalImageStorageAdapter).useValue({}).overrideProvider(OutboxWorker).useValue({}).overrideProvider(ReturnEventReconciler).useValue({}).overrideProvider(ProposalExpiryScheduler).useValue({}).overrideProvider(OrderExpiryScheduler).useValue({}).compile();
+    const app = module.createNestApplication(); configureApp(app); await app.init();
+    try {
+      await request(app.getHttpServer()).post(`/api/after-sales/${randomUUID()}/returns/simulated-progress`).set('Authorization', `Bearer ${h.token(h.actors.initiator)}`).send({}).expect(404);
+      await request(app.getHttpServer()).get(`/api/after-sales/${randomUUID()}/returns`).expect(401);
+    } finally { await app.close(); }
+  } finally { for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } }
+});
+it.each(['audit', 'crash'] as const)('reconciles the last accepted EXCEPTION after %s without a client retry or another provider operation', async failure => {
+  await deferOtherCommands();
+  const f = await fixture({ count: 1, delivered: ['INITIATOR'] }); await ready(f); await closeOriginals(f); await deferOtherCommands(); await (await parcel(f)).expect(200);
+  const worker = new OutboxWorker(h.prisma, h.clock, h.app.get(OutboxHandlerRegistry));
+  try {
+    await worker.tick();
+    const op = await h.prisma.outboxCommand.findFirstOrThrow({ where: { orderId: f.order.id, kind: 'VERIFY_RETURN' } });
+    const shipmentId = (op.payload as { shipmentId: string }).shipmentId;
+    expect((await simulate(f, h.actors.recipient, shipmentId, { kind: 'RETURN_PROGRESS', progress: 'COLLECTED' })).status).toBe(200);
+    h.clock.advance(30000); await worker.tick();
+    expect((await simulate(f, h.actors.recipient, shipmentId, { kind: 'RETURN_PROGRESS', progress: 'DELIVERED' })).status).toBe(200);
+    const before = await refresh(f);
+    const priorEvents = await h.prisma.returnEvent.count({ where: { shipmentId } });
+    if (failure === 'audit') h.faultAuditActionAfterInsertOnce('RETURN_PROVIDER_FACT_RECORDED', async tx => {
+      expect(await tx.riskTask.count({ where: { caseId: f.caseId, kind: 'RETURN_EXCEPTION' } })).toBe(1);
+    });
+    else vi.spyOn(h.app.get(ReturnEventsService), 'applyVerified').mockRejectedValueOnce(new Error('Process stopped after provider acceptance before domain transaction'));
+    expect((await simulate(f, h.actors.recipient, shipmentId, { kind: 'RETURN_PROGRESS', progress: 'EXCEPTION' })).status).toBe(500);
+    // Admission itself advances versions, but no domain fact/receipt/risk survived.
+    expect((await refresh(f)).expectedCaseVersion).toBe(before.expectedCaseVersion + 1);
+    expect(await h.prisma.returnEvent.count({ where: { shipmentId } })).toBe(priorEvents);
+    expect(await h.prisma.riskTask.count({ where: { caseId: f.caseId, kind: 'RETURN_EXCEPTION' } })).toBe(0);
+    const accepted = await h.prisma.simulatedProviderEvent.findFirstOrThrow({ where: { businessNo: op.businessNo, payload: { path: ['progress'], equals: 'EXCEPTION' } } });
+    expect(await h.prisma.integrationEvent.count({ where: { provider: accepted.provider, eventId: accepted.eventId } })).toBe(0);
+    vi.restoreAllMocks();
+    const events = h.app.get(ReturnEventsService);
+    if (failure === 'audit') {
+      h.faultAuditActionAfterInsertOnce('RETURN_PROVIDER_FACT_RECORDED', async () => {});
+      const interrupted = new ReturnEventReconciler(h.prisma, events, h.app.get(INTEGRATION_CONFIG));
+      try { await interrupted.tick(); } finally { await interrupted.onModuleDestroy(); }
+      expect(await h.prisma.integrationEvent.count({ where: { provider: accepted.provider, eventId: accepted.eventId } })).toBe(0);
+      expect(await h.prisma.riskTask.count({ where: { caseId: f.caseId, kind: 'RETURN_EXCEPTION' } })).toBe(0);
+      vi.restoreAllMocks();
+    }
+    const a = new ReturnEventReconciler(h.prisma, events, h.app.get(INTEGRATION_CONFIG));
+    const b = new ReturnEventReconciler(h.prisma, events, h.app.get(INTEGRATION_CONFIG));
+    try { await Promise.all([a.tick(), b.tick()]); await a.tick(); } finally { await a.onModuleDestroy(); await b.onModuleDestroy(); }
+    expect((await obligations(f))[0].progress).toMatchObject({ status: 'DISPUTED', confirmedAt: null });
+    expect(await h.prisma.returnShipment.findUniqueOrThrow({ where: { id: shipmentId } })).toMatchObject({ status: 'EXCEPTION', deliveredAt: expect.any(Date) });
+    expect(await h.prisma.returnEvent.count({ where: { shipmentId, kind: 'EXCEPTION' } })).toBe(1);
+    expect(await h.prisma.riskTask.count({ where: { caseId: f.caseId, kind: 'RETURN_EXCEPTION' } })).toBe(1);
+    expect((await h.prisma.outboxCommand.findUniqueOrThrow({ where: { id: op.id } })).status).toBe('SUCCEEDED');
+    expect(await h.prisma.simulatedProviderOperation.count({ where: { businessNo: op.businessNo } })).toBe(1);
+    const stored = await h.prisma.integrationEvent.findUniqueOrThrow({ where: { provider_eventId: { provider: accepted.provider, eventId: accepted.eventId } }, include: { receipt: true } });
+    expect(stored.receipt?.status).toBe('PROCESSED');
+    expect(await h.prisma.auditLog.count({ where: { action: 'RETURN_PROVIDER_FACT_RECORDED', entityId: stored.id } })).toBe(1);
+    await expect(h.prisma.simulatedProviderEvent.update({ where: { id: accepted.id }, data: { payload: {} } })).rejects.toThrow('immutable');
+    await expect(h.prisma.simulatedProviderEvent.delete({ where: { id: accepted.id } })).rejects.toThrow('immutable');
+    await expect(h.app.get(SimulatedProviderStore).recordEvent({ ...(accepted.payload as unknown as VerifiedIntegrationEvent), occurredAt: '2026-10-01T00:00:00.000Z' })).rejects.toThrow();
+  } finally { await worker.onModuleDestroy(); }
+});
 it('consumes runtime simulated COLLECTED then later DELIVERED and EXCEPTION after actual worker success without duplicate operations', async () => {
   await deferOtherCommands();
   const f = await fixture({ count: 1, delivered: ['INITIATOR'] }); await ready(f);

@@ -98,6 +98,16 @@ export class SimulatedProviderStore {
       await tx.$queryRaw`SELECT id FROM "SimulatedProviderOperation" WHERE "businessNo" = ${event.businessNo} FOR UPDATE`;
       const row = await tx.simulatedProviderOperation.findUnique({ where: { businessNo: event.businessNo } });
       if (!row) throw invalid();
+      const durableReturn = event.kind === 'RETURN_PROGRESS' || event.kind === 'ORIGINAL_SHIPMENT_CLOSED';
+      if (durableReturn) {
+        const accepted = await tx.simulatedProviderEvent.findUnique({ where: { provider_eventId: { provider: event.provider, eventId: event.eventId } } });
+        // An accepted identity remains retryable after newer progress. Never
+        // downgrade the operation snapshot just to redeliver that old fact.
+        if (accepted) {
+          if (!isDeepStrictEqual(accepted.payload, event)) throw conflict();
+          return;
+        }
+      }
       const payload = row.payload as Prisma.JsonObject;
       if (event.kind === 'ORIGINAL_SHIPMENT_CLOSED') {
         if (row.kind !== 'CLOSE_OR_INTERCEPT' || payload.shipmentId !== event.shipmentId) throw conflict();
@@ -123,6 +133,7 @@ export class SimulatedProviderStore {
       }
       const externalTransactionId = 'shipmentId' in event ? event.shipmentId : event.externalTransactionId;
       const result: ProviderResult = { status: 'SUCCESS', externalTransactionId, event };
+      if (durableReturn) await tx.simulatedProviderEvent.create({ data: { provider: event.provider, eventId: event.eventId, businessNo: event.businessNo, kind: event.kind, payload: event as unknown as Prisma.InputJsonObject } });
       await tx.simulatedProviderOperation.update({ where: { id: row.id }, data: { status: 'SUCCESS', externalTransactionId, result: json(result) } });
     });
   }

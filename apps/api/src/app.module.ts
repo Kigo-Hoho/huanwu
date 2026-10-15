@@ -20,6 +20,7 @@ import { AfterSalesModule } from './after-sales/after-sales.module.js';
 import { EvidenceModule } from './evidence/evidence.module.js';
 import { RiskModule } from './risk/risk.module.js';
 import { ReturnsModule } from './returns/returns.module.js';
+import { TestingReturnsController } from './returns/testing-returns.controller.js';
 
 @Module({
   imports: [DatabaseModule, AuthModule, AuditModule, ItemsModule, StorageModule, ProposalsModule, OrdersModule, IntegrationsModule, PaymentsModule, LogisticsModule, OperatorSecurityModule, AfterSalesModule, EvidenceModule, RiskModule, ReturnsModule],
@@ -34,6 +35,6 @@ import { ReturnsModule } from './returns/returns.module.js';
 export class AppModule {
   static forEnvironment(): DynamicModule {
     const testing = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
-    return { module: AppModule, controllers: [...(testing && process.env.PAYMENT_PROVIDER === 'simulated' ? [TestingIntegrationsController] : []), ...(testing && process.env.LOGISTICS_PROVIDER === 'simulated' ? [TestingLogisticsController] : [])] };
+    return { module: AppModule, controllers: [...(testing && process.env.PAYMENT_PROVIDER === 'simulated' ? [TestingIntegrationsController] : []), ...(testing && process.env.LOGISTICS_PROVIDER === 'simulated' ? [TestingLogisticsController, TestingReturnsController] : [])] };
   }
 }

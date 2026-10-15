@@ -624,8 +624,25 @@ model SimulatedProviderOperation {
   result                Json?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
+  events                SimulatedProviderEvent[]
 
   @@index([orderId])
+}
+
+// Accepted simulator facts outlive any failed domain transaction. Delivery is
+// acknowledged only by the separate IntegrationEventReceipt domain transaction.
+model SimulatedProviderEvent {
+  id         BigInt                     @id @default(autoincrement())
+  provider   String
+  eventId    String
+  businessNo String
+  kind       IntegrationEventKind
+  payload    Json
+  acceptedAt DateTime                   @default(now())
+  operation  SimulatedProviderOperation @relation(fields: [businessNo], references: [businessNo], onDelete: Restrict)
+
+  @@unique([provider, eventId])
+  @@index([businessNo])
 }
 
 enum CaseStatus {
