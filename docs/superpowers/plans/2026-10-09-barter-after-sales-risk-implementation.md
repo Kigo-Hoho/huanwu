@@ -151,11 +151,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `TradingRestrictionsService.lockAndAssert(tx, userIds: string[]): Promise<void>`、`RiskTaskService.recordInTransaction(tx, input): Promise<void>`；`RiskActionsService.freeze/unfreeze/unpublish/pause(context, resourceId, input, key): Promise<RiskCommandResult>`（Task1类型）。`activeBlockers(tx, orderId): Promise<RiskBlocker[]>` 供恢复服务使用。
 
-- [ ] **Step 1: 写失败测试。** 公开物品/自有运单举报与匿名性；同目标同类开放举报去重；客服不能冻结；冻结与提案接受并发只有安全序列结果。冻结用户仍可登录、举证、退货；公开隐藏被冻结物主物品，解冻不自动恢复已下架物品。终态运单异常只追加待办。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/risk-reports.e2e-spec.ts test/phase4/trading-freeze-races.e2e-spec.ts`。
-- [ ] **Step 3: 实现风险闭环。** OPEN/INVESTIGATING/ACTIONED/DISMISSED、认领补证结论与证据访问；创建交易限制基线行确保不存在记录也可锁。新发布/提交、双方提案修改/接受、转订单均检查双方当前限制；限制行按ID先锁，不批量遍历订单。下架增加独立风险阻塞，不能用户编辑绕过；物品解禁后走重新审核。Shipment EXCEPTION 在事实事务中去重待办并暂停非终态，禁止把运营证明直接改成DELIVERED。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、第一阶段发布审核、第二阶段提案并发和第三阶段物流异常回归；单项处置审计失败回滚。
-- [ ] **Step 5: 审查与提交。** `feat: add reports and transaction-safe trading restrictions`。
+- [x] **Step 1: 写失败测试。** 公开物品/自有运单举报与匿名性；同目标同类开放举报去重；客服不能冻结；冻结与提案接受并发只有安全序列结果。冻结用户仍可登录、举证、退货；公开隐藏被冻结物主物品，解冻不自动恢复已下架物品。终态运单异常只追加待办。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/risk-reports.e2e-spec.ts test/phase4/trading-freeze-races.e2e-spec.ts`。
+- [x] **Step 3: 实现风险闭环。** OPEN/INVESTIGATING/ACTIONED/DISMISSED、认领补证结论与证据访问；创建交易限制基线行确保不存在记录也可锁。新发布/提交、双方提案修改/接受、转订单均检查双方当前限制；限制行按ID先锁，不批量遍历订单。下架增加独立风险阻塞，不能用户编辑绕过；物品解禁后走重新审核。Shipment EXCEPTION 在事实事务中去重待办并暂停非终态，禁止把运营证明直接改成DELIVERED。
+- [x] **Step 4: GREEN。** 重跑 Step 2、第一阶段发布审核、第二阶段提案并发和第三阶段物流异常回归；单项处置审计失败回滚。
+- [x] **Step 5: 审查与提交。** `feat: add reports and transaction-safe trading restrictions`。
 
 ### Task 8: 多物归还义务、退货物流与私有地址
 
@@ -261,7 +261,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～6 已完成，Tasks 7～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～7 已完成，Tasks 8～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
 
 ### Task 1 实际结果
 
@@ -318,3 +318,14 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - GREEN：修复后相关三套测试69/69；最终完整 `npm run verify` 退出0，863/863测试通过，并通过lint、typecheck和所有workspace build。测试包含PostgreSQL实锁和规划屏障：证明执行先获得审批围栏时撤销等待提交、撤销先提交时执行失败回滚，以及不同执行人竞争仅一个获胜。可信签名 COURIER 异常后送达事件覆盖历史异常事实保留及补救门禁恢复。无状态库替换或真实外部业务调用。
 - 两份独立 scoped 修复复审均 PASS：原两项 Important 均 ADDRESSED，未发现新的 Critical/Important/Minor。范围为 `c156dce..47edfcd`。复审确认角色撤销/凭据撤销/账户禁用在事务内受到身份行围栏；实现不声称防护任意外部 SQL 人为插入此前不存在的 CUSTOMER 角色，这一限制已记录，未来角色管理入口须纳入同一围栏协议。质量报告中的全仓结果为实现代理记录，复审者未重复运行。
 - 测试库归属/清理及Phase4隔离证明均通过；未修改既有迁移或依赖。候选 `c156dce` 的初始复审发现及修复过程见 `.superpowers/sdd/2026-10-09-barter-after-sales-risk-implementation/task-6-report.md` 与独立审查记录。全仓六项阶段门槛仍须 Task14 最终执行。
+
+### Task 7 实际结果（2026-10-15）
+
+- 提交：`8ed974c`（举报、交易冻结、单项下架与异常运单待办）；`4469db5`（修复风险阻塞标识可读、冻结后成功命令幂等恢复及隐藏目标隐私问题）。原候选全仓 `npm run verify` 为895/895；审查修正后稳定树全仓验证为925/925，lint、typecheck与所有workspace build均通过。修复专项60/60；受影响第一至第三阶段遗留回归38/38。原候选另有第一/二阶段回归52/52、第三阶段回归68/68。
+- 举报公开物品/参与人运单，执行身份、当前目标可见性、严格去重、匿名安全投影及私有证据授权；审核风控/超级管理员执行认领、补证和有证据结论。账号冻结使用独立版本化交易限制行，不禁登录或售后读取、不批量改写物品/订单；公开列表即时隐藏冻结物主的物品。限制行按参与人 ID 排序并先于物品/提案/订单锁取得，冻结竞态使用真实 PostgreSQL 阻塞观测测试。
+- 单项下架建立独立风险阻塞；解除后物品仍为 INACTIVE，物主需编辑、重新提交并通过常规审核。订单风险解除只清除经来源校验的单一风险阻塞，不自动恢复订单或清理工单/物流等无关阻塞。授权管理查询仅返回当前用户限制摘要；风险任务列表/详情只在非终态订单、受支持且未解决任务与匹配的开放风险阻塞时给出确切 blockerId，终态/已解决/错误关联不返回可操作标识。
+- 交易限制检查和限制行锁分离：先按稳定顺序锁限制行、再锁业务资源并完成身份/参与方核验；命中同一调用者同键、同内容的既有成功记录时允许恢复原响应、不重写状态或审计。新命令仍拒绝冻结参与者；错误内容/资源/用户不能取回旧响应。创建新提案对不存在、不公开、冻结物主的目标统一 `ITEM_UNAVAILABLE`，且在等待限制锁后重新核验目标状态，避免利用错误码探测私有物品或物主冻结状态。
+- 可信 Shipment EXCEPTION 在事实事务内幂等写入风险待办；仅非终态订单增加独立风险阻塞/暂停，原暂停原因保留，终态只新增待办且不回退状态。后续签名 DELIVERED 可补充送达事实但不抹去 EXCEPTION；运营不能直接写运单进度。终态异常待办目前可供授权风险人员查看，后续结案写操作未在 Task7 发明，留为显式产品决策。
+- 初始候选独立审查发现3项 Important：清除风险阻塞所需 blockerId 未通过任何管理只读投影暴露；冻结检查在幂等重放前导致成功命令无法恢复；创建提案会对不可见物品泄露物主被冻结状态。修复逐项先观测 RED 后实现，增加 HTTP-only blocker查询/清除、五类命令冻结后恢复及不同参与人覆盖、隐藏目标和冻结等待竞态测试。两位新的 scoped 修复复审均 PASS：三项发现全部 ADDRESSED，差异内无新增 Important/Critical；范围 `8ed974c..4469db5`。首轮与修复轮完整报告见 `.superpowers/sdd/2026-10-09-barter-after-sales-risk-implementation/task-7-report.md` 和独立审查报告。
+- 新增迁移仅为 `20261015190000_risk_clearance_actions` 枚举追加清除授权，不改既有迁移或依赖。阶段验证数据库仅限自有 PostgreSQL 17 名称空间、普通清理及catalog/count/migration证明，不宣称源数据逐行一致；图片测试清理仅处理本套件自有临时目录。没有 SQLite、reset、强制 DROP、真实外部服务、秘密、推送或合并。
+- 仍未覆盖/不声称完成：实际归还 API 属 Task8；订单恢复属 Task10；终态异常待办的结案产品决策未制定；用户/运营界面分别属 Tasks12/13；浏览器流程与阶段六条最终门槛属 Task14。
