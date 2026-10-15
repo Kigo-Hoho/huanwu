@@ -135,11 +135,11 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `ResolutionApprovalService.approve(context: OperatorActionContext, caseId, input, key): Promise<CaseCommandResult>`；`ResolutionExecutionService.start(context, caseId, input, key): Promise<CaseCommandResult>`；`ResolutionExecutor.planInTransaction(ctx, resolution): Promise<void>`，具体义务由 Tasks 8～10 注册实现。不支持的执行类型明确拒绝，不把空执行器当成功。
 
-- [ ] **Step 1: 写失败测试。** 两名不同超级管理员批准后才执行资金方案，起草者、自批第二次、客服、移动会话均拒；grant后改版本/撤设备拒绝；审计失败回滚批准、grant消费和outbox；同键重试只一份执行记录。无资金CONTINUE仍需有权限且重新验证的恢复命令，不伪造资金审批。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/resolution-approval.e2e-spec.ts`。
-- [ ] **Step 3: 实现审批门禁。** 消费Task2grant；客户同意/平台裁决资格与资金批准分离。批准不可修改，判断当前方案、有效身份、不同批准者与非起草者；变更自动使旧批准不适用。执行唯一绑定case/resolution/step，原资金 UNKNOWN 阻止冲突执行。并发签发授权和业务动作统一锁序，审批通过不授予任意外部资金调用权限。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、operator-security、resolutions。用客服起草、两个管理员批准；超级管理员起草测试增加第三个管理员 fixture，不降低非自批规则。
-- [ ] **Step 5: 审查与提交。** `feat: gate resolution execution with dual financial approval`。
+- [x] **Step 1: 写失败测试。** 两名不同超级管理员批准后才执行资金方案，起草者、自批第二次、客服、移动会话均拒；grant后改版本/撤设备拒绝；审计失败回滚批准、grant消费和outbox；同键重试只一份执行记录。无资金CONTINUE仍需有权限且重新验证的恢复命令，不伪造资金审批。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/resolution-approval.e2e-spec.ts`。
+- [x] **Step 3: 实现审批门禁。** 消费Task2grant；客户同意/平台裁决资格与资金批准分离。批准不可修改，判断当前方案、有效身份、不同批准者与非起草者；变更自动使旧批准不适用。执行唯一绑定case/resolution/step，原资金 UNKNOWN 阻止冲突执行。并发签发授权和业务动作统一锁序，审批通过不授予任意外部资金调用权限。
+- [x] **Step 4: GREEN。** 重跑 Step 2、operator-security、resolutions。用客服起草、两个管理员批准；超级管理员起草测试增加第三个管理员 fixture，不降低非自批规则。
+- [x] **Step 5: 审查与提交。** `feat: gate resolution execution with dual financial approval`。
 
 ### Task 7: 举报、交易冻结、单项下架与异常运单待办
 
@@ -257,7 +257,7 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 
 ## 执行记录（确认计划后逐任务填写）
 
-设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～5 已完成，Tasks 6～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
+设计及计划：用户于2026-10-09确认。实施准备：当前分支干净；用户明确选择沿用现有工作区；Docker daemon 未启动，使用新建、仅监听本机的 PostgreSQL 17 临时验证集群，不修改原保留业务库。Tasks 1～6 已完成，Tasks 7～14 尚未完成；最终六条门槛仍待阶段末独立执行。执行方式沿用子代理逐任务开发与独立审查。
 
 ### Task 1 实际结果
 
@@ -305,3 +305,12 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - RED/GREEN：初始有效 PostgreSQL 运行 7/8失败，其中原始SQL插入 REJECT+NULL 成功证实约束缺陷；缺少路由为404。扩展11项中10项失败，覆盖裁决权限与投影。新增管理上下文和 CONTINUE+400分方案也各自先观察RED；修复后方案专项21/21，Phase4 API全套195/195，契约专项15/15通过。最终候选 `ed29a7f` 全仓843/843；审计修复后最终全仓844/844（root12/admin29/API146/Phase3 API261/Phase4 API198/miniapp128/contracts70）。最终API lint、API typecheck、contracts typecheck与diff-check均退出0；契约工作区没有独立lint脚本。
 - 审查：初始独立规范复审通过；质量复审提出一项非阻断的最终业务审计回滚测试缺口，新增真实 audit INSERT 后故障、完整事务状态快照回滚及同grant/key重试/重放。两位新的 scoped 复审代理确认该问题已解决、无新增Critical/Important/Minor。CONTINUE补偿结案条件也已同步写入本设计及Task9/10计划：普通履约可继续，但补偿和转付未核验完成时工单保持开放。质量复审指出的 earlier spec minor已在公共文档中明确修正。
 - 每次 PostgreSQL 验证使用自有命名空间与普通清理；报告证明源表计数/迁移记录不变、测试库清空，不宣称逐行/逐字节源数据相等。完整候选全仓测试存在一次与最后两处修改重叠的失败运行，已原样记录；稳定代码上的最终完整运行844/844退出0，未把重叠运行称为通过。无真实资金/物流服务、SQLite、历史迁移改写、推送或合并。
+
+### Task 6 实际结果（2026-10-15）
+
+- 提交：`c156dce`（双人资金审批及执行授权）；`47edfcd`（并发身份权限围栏与历史运单异常门禁修复）；本任务完成记录另行提交。
+- 资金执行批准绑定当前不可修改方案版本；不同、具备当前有效凭据的超级管理员共同批准，起草者不得自批，客服与移动会话不具备执行权。执行记录、grant消费、事务计划、审计和幂等结果共用业务事务；不支持的执行类型明确失败，不调用真实外部资金服务。
+- RED：初始18项中3项失败，分别暴露历史运单EXCEPTION永久阻断补救执行，以及执行规划期间批准者角色/凭据撤销可竞态提交。修复加入事务内、稳定排序的用户/角色/凭据共享锁与重读资格；另测角色撤销先提交时拒绝执行且不消费授权。历史EXCEPTION事实保持不变，只要求独立活动风险及未解决阻塞已清理。
+- GREEN：修复后相关三套测试69/69；最终完整 `npm run verify` 退出0，863/863测试通过，并通过lint、typecheck和所有workspace build。测试包含PostgreSQL实锁和规划屏障：证明执行先获得审批围栏时撤销等待提交、撤销先提交时执行失败回滚，以及不同执行人竞争仅一个获胜。可信签名 COURIER 异常后送达事件覆盖历史异常事实保留及补救门禁恢复。无状态库替换或真实外部业务调用。
+- 两份独立 scoped 修复复审均 PASS：原两项 Important 均 ADDRESSED，未发现新的 Critical/Important/Minor。范围为 `c156dce..47edfcd`。复审确认角色撤销/凭据撤销/账户禁用在事务内受到身份行围栏；实现不声称防护任意外部 SQL 人为插入此前不存在的 CUSTOMER 角色，这一限制已记录，未来角色管理入口须纳入同一围栏协议。质量报告中的全仓结果为实现代理记录，复审者未重复运行。
+- 测试库归属/清理及Phase4隔离证明均通过；未修改既有迁移或依赖。候选 `c156dce` 的初始复审发现及修复过程见 `.superpowers/sdd/2026-10-09-barter-after-sales-risk-implementation/task-6-report.md` 与独立审查记录。全仓六项阶段门槛仍须 Task14 最终执行。
