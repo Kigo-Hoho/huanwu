@@ -163,11 +163,13 @@ it('pins the inclusive net compensation ceiling', () => {
 
 **Interfaces:** Produces `ReturnPlanService.planInTransaction(ctx, resolution): Promise<void>`；`ReturnCommandsService.registerShipment/handBack/confirmReceived(context, input): Promise<CaseCommandResult>`；`ReturnAddressService.get(actor, caseId, side: 'self'|'outgoing')`（Task1地址DTO）；`ReturnEventsService.applyVerified(event): Promise<void>`。LogisticsPort 扩展 verifyReturn/queryReturn/closeOrIntercept/queryInterception，都采用 ProviderOperation/ProviderResult；原接口不换签名。
 
-- [ ] **Step 1: 写失败测试。** 发起方5件/接收方1件逐件义务、合包无漏项；只一方交付不虚构另一方退货；注册原运单必须先核验拦截/关闭；面交交出与原物主确认不同角色；退货物流送达不自动确认；外人地址404，ON_HOLD 不因此开放原 outgoing地址接口。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/returns.e2e-spec.ts`。
-- [ ] **Step 3: 实现归还。** 原物主自己提供/确认加密归还地址，复用AddressCipher算法和AAD规范但隔离ReturnAddress身份；方案执行冻结地址，只有实际退回方在该归还义务合法执行时可读outgoing，泛化管理/幂等响应不含明文。快递覆盖snapshotID集合严格核验，运单全局不能复用原/其他退货单；独立ReturnShipment/Event。短事务outbox登记/核验拦截，未知结果不假设物品未交付。物流真实事实和客户确认分离，未归还异常留人工裁决。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、原地址加密/泄露、原快递与面交回归；核验原Shipment不被覆盖、未知占用保留。
-- [ ] **Step 5: 审查与提交。** `feat: add item-level returns and controlled reverse logistics`。
+- [x] **Step 1: 写失败测试。** 发起方5件/接收方1件逐件义务、合包无漏项；只一方交付不虚构另一方退货；注册原运单必须先核验拦截/关闭；面交交出与原物主确认不同角色；退货物流送达不自动确认；外人地址404，ON_HOLD 不因此开放原 outgoing地址接口。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/returns.e2e-spec.ts`。
+- [x] **Step 3: 实现归还。** 原物主自己提供/确认加密归还地址，复用AddressCipher算法和AAD规范但隔离ReturnAddress身份；方案执行冻结地址，只有实际退回方在该归还义务合法执行时可读outgoing，泛化管理/幂等响应不含明文。快递覆盖snapshotID集合严格核验，运单全局不能复用原/其他退货单；独立ReturnShipment/Event。短事务outbox登记/核验拦截，未知结果不假设物品未交付。物流真实事实和客户确认分离，未归还异常留人工裁决。
+- [x] **Step 4: GREEN。** 重跑 Step 2、原地址加密/泄露、原快递与面交回归；核验原Shipment不被覆盖、未知占用保留。
+- [x] **Step 5: 审查与提交。** `feat: add item-level returns and controlled reverse logistics`。
+
+**执行记录（2026-10-15）：** 实现提交 `9c1e7f1`，修复提交 `f058bcd`、`349192d`。第二轮 fresh spec/quality scoped re-review 均通过，R1 事件恢复缺口及 M1 测试路由注册偏差均已关闭。最终稳定树 `node .superpowers/sdd/2026-10-09-barter-after-sales-risk-implementation/local-postgres.mjs run npm run verify` 退出码0，979/979；Task8+Task6 专项72/72，Phase3 回归95/95；完整 verify 包含 lint、typecheck、test 和 build。已知迁移边界：只能回填升级时仍保存在模拟供应商成功结果中的事实；旧实现已覆盖且没有持久正文的历史事件不能凭空恢复。此项未实现真实物流/资金，也未提前实现 Task9/10/11。
 
 ### Task 9: 独立补偿支付、可信资金事实与原款退款
 
