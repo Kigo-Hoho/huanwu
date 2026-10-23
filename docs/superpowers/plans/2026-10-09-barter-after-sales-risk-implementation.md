@@ -179,11 +179,13 @@ Task9 实施契约澄清（2026-10-22）：增加严格客户补偿摘要/checko
 
 **Interfaces:** Produces `CompensationService.planInTransaction(ctx, resolution): Promise<void>`、`requestPayment(context): Promise<CaseCommandResult>`、`getCheckout(actor, caseId, paymentId): Promise<CompensationCheckoutView>`；`CompensationPort.create/query/close/refund/queryRefund/disburse/queryDisbursement` 采用现有 ProviderOperation/ProviderResult。`CompensationEventsService.applyVerified(event): Promise<void>`；`CaseFundsStatus = {complete:boolean;unknown:boolean;conflicting:boolean}`、`CaseFundsStatusService.inspect(tx, caseId): Promise<CaseFundsStatus>`（定义在本任务并供Task10使用）。
 
-- [ ] **Step 1: 写失败测试。** 未审批不出款、裁决不主动扣客户款；净额60000通过/60001拒绝；退款与转付互斥、原差价不重复回转、原保证金无罚扣。乱序转付/退款事件先保存，收款到账后按原号补核验；外部成功但本地审计失败再次对账不二次执行；UNKNOWN始终保留占用。
-- [ ] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/compensation.e2e-spec.ts test/phase4/after-sales-financial-races.e2e-spec.ts`。
-- [ ] **Step 3: 实现独立资金域。** 新业务号 `compensation:payment:<paymentId>`、`compensation:refund:<paymentId>`、`compensation:disburse:<paymentId>` 全程稳定。引用方案/根争议/原支付、金额/币种/付款收款侧，独立账本唯一事实。原款退款沿用 `refund:<intentId>`，不改原PaymentPurpose唯一规则。对账可以入账既有外部事实，execute必须持合法且当前义务授权；处理并发authorize→I/O时间窗，记录在途执行认领，方案改动必须等待已认领业务核验。关闭/退款/转付状态互斥在模拟供应商和本地都保证；通用响应/幂等/审计不能保存checkout。测试驱动只在显式dev/test或acceptance H5启用，生产拒绝。
-- [ ] **Step 4: GREEN。** 重跑 Step 2、原订单支付/退款/结算、outbox lease与未知回调回归；断言同一根义务付款/退款/转付次数与金额守恒。若 CONTINUE_EXCHANGE 有独立补偿，未支付或转付 UNKNOWN 时 `CaseFundsStatus.complete=false`，不能报告工单资金义务完成。
-- [ ] **Step 5: 审查与提交。** `feat: add independently reconciled simulated compensation`。
+- [x] **Step 1: 写失败测试。** 未审批不出款、裁决不主动扣客户款；净额60000通过/60001拒绝；退款与转付互斥、原差价不重复回转、原保证金无罚扣。乱序转付/退款事件先保存，收款到账后按原号补核验；外部成功但本地审计失败再次对账不二次执行；UNKNOWN始终保留占用。
+- [x] **Step 2: RED。** `npm exec --workspace @barter/api -- vitest run --config vitest.phase4.config.ts test/phase4/compensation.e2e-spec.ts test/phase4/after-sales-financial-races.e2e-spec.ts`。
+- [x] **Step 3: 实现独立资金域。** 新业务号 `compensation:payment:<paymentId>`、`compensation:refund:<paymentId>`、`compensation:disburse:<paymentId>` 全程稳定。引用方案/根争议/原支付、金额/币种/付款收款侧，独立账本唯一事实。原款退款沿用 `refund:<intentId>`，不改原PaymentPurpose唯一规则。对账可以入账既有外部事实，execute必须持合法且当前义务授权；处理并发authorize→I/O时间窗，记录在途执行认领，方案改动必须等待已认领业务核验。关闭/退款/转付状态互斥在模拟供应商和本地都保证；通用响应/幂等/审计不能保存checkout。测试驱动只在显式dev/test或acceptance H5启用，生产拒绝。
+- [x] **Step 4: GREEN。** 重跑 Step 2、原订单支付/退款/结算、outbox lease与未知回调回归；断言同一根义务付款/退款/转付次数与金额守恒。若 CONTINUE_EXCHANGE 有独立补偿，未支付或转付 UNKNOWN 时 `CaseFundsStatus.complete=false`，不能报告工单资金义务完成。
+- [x] **Step 5: 审查与提交。** `feat: add independently reconciled simulated compensation`。
+
+**执行记录（2026-10-23）：** Task9 Steps 1–5 已完成，提交 `1d30cd55`。已观察真实 RED 后逐项实现；专项25/25、原资金回归118/118、完整Phase4 355/355；稳定树 `npm run verify` 退出码0，1004/1004，包含 lint/typecheck/test/build。两个新独立审查均通过，无 Critical/Important。非阻断测试建议带入Task10：对真实合法终止入口验证在途CLAIM保护；用已交付物品验证退货与补偿同时规划。三个API runner 固化 maxWorkers=2，依据默认并发下重复连接/迁移清理超时与限并发对照通过；未放宽超时或业务断言。金融事件使用独立持久inbox与原号恢复；旧被覆盖事件无法回填。任务级未新增界面，浏览器与六条独立阶段验收仍属于Task14。
 
 ### Task 10: 安全恢复、方案收尾与占用释放
 
