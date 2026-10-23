@@ -92,7 +92,13 @@ export const CaseCommandResultSchema = z.strictObject({ case: CaseViewSchema, or
 export const AdminCaseCommandResultSchema = z.strictObject({ case: AdminCaseViewSchema, orderVersion: version });
 export const CaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
 export const AdminCaseRecordViewSchema = z.strictObject({ id: uuid, kind: text(1, 100), actorKind: z.enum(['CUSTOMER', 'PLATFORM', 'SYSTEM']), side: OrderSideSchema.nullable(), description: text(1, 2000), createdAt: time });
-export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema), evidence: z.array(EvidenceViewSchema).default([]), resolutions: z.array(ResolutionViewSchema).default([]) });
+export const CompensationCheckoutViewSchema = z.union([
+  z.strictObject({ paymentId: uuid, status: z.literal('PENDING') }),
+  z.strictObject({ paymentId: uuid, status: z.literal('READY'), provider: z.literal('simulated'), params: z.strictObject({ simulation: z.literal('true'), businessNo: z.string() }) }),
+]);
+export type CompensationCheckoutView = z.infer<typeof CompensationCheckoutViewSchema>;
+export const CompensationSummarySchema = z.strictObject({ obligationId: uuid, resolutionVersion: version, paymentId: uuid.nullable(), payerSide: OrderSideSchema, payeeSide: OrderSideSchema, amountFen: z.number().int().positive().max(60000), currency: z.literal('CNY'), paymentDeadline: time, status: z.enum(['PENDING','AUTHORIZED','COLLECTED','TRANSFERRING','TRANSFERRED','REFUNDING','REFUNDED','CLOSED','UNKNOWN','FAILED']) });
+export const CaseDetailViewSchema = z.strictObject({ ...CaseViewSchema.shape, records: z.array(CaseRecordViewSchema), evidence: z.array(EvidenceViewSchema).default([]), resolutions: z.array(ResolutionViewSchema).default([]), compensation: z.array(CompensationSummarySchema).default([]) });
 export const AdminCaseDetailViewSchema = z.strictObject({ ...AdminCaseViewSchema.shape, records: z.array(AdminCaseRecordViewSchema), evidence: z.array(AdminEvidenceViewSchema).default([]), resolutions: z.array(AdminResolutionViewSchema).default([]), resolutionContext: AdminResolutionContextSchema.optional() });
 export const AdminCaseListViewSchema = z.strictObject({ items: z.array(AdminCaseViewSchema), nextCursor: z.string().nullable() });
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;

@@ -98,6 +98,12 @@ Task8 模拟事实恢复澄清（2026-10-15）：显式模拟物流每次接受�
 
 ## 8. 暂停恢复、举报与违规账号
 
+Task9 资金接口澄清（2026-10-22）：客户 `POST /api/after-sales/:caseId/compensation/payments` 使用工单/订单/方案版本和幂等键，返回原有脱敏 CaseCommandResult；客户工单详情的 `compensation` 数组给出义务/支付 ID、方向、整数分金额、期限和状态，不含 checkout。付款方独立调用 `GET /api/after-sales/:caseId/compensation/payments/:paymentId/checkout`，响应 no-store。显式 development/test simulated 才注册 `/api/testing/compensation/:paymentId/complete`，服务运行时也拒绝 production。三个资金业务号固定为 `compensation:payment:<paymentId>`、`compensation:refund:<paymentId>`、`compensation:disburse:<paymentId>`；内部关闭能力使用 `compensation:close:<paymentId>`。Task9 不新增公开取消入口；目前未提供授权取消转换时，不发送关闭/退款。意外退款/关闭保留可信事实并建立冲突待办，不宣称原转付义务已完成。
+
+资金执行器在原 Task6 审批/授权事务内规划；退货方案显式组合退货规划器与资金规划器。START 保持待订单收尾，未实现的纯恢复不能以空执行器报告成功。执行发送前按当前审批人身份、当前方案、风险/阻塞及唯一 outbox 验证，并写不可修改的 `ResolutionExecution(executionStep=CLAIM:<businessNo>)` 与 PROCESSING 进度；认领在 I/O 外独立提交，方案替换/关闭不得跨过未核验执行。原款使用原 `refund:<intentId>`，其退款/结算必须符合方案且退回/验收前提已满足。可信事实可在后续权限失效后入账；审计失败按原号重查，不二次执行。
+
+模拟供应商收件箱在独立事务内保存所有新接受的资金事实（含原支付与补偿），金融恢复器与退货恢复器按事件类型分别消费，回执与账本/风险/审计原子提交。补偿到账前到达的退款或转付保留 PENDING，到账后重放；历史升级只能回填仍在当前结果中的事实，不恢复已被覆盖的历史正文。CaseFundsStatusService.inspect 提供 complete/unknown/conflicting；独立补偿未收款、转付 UNKNOWN、未核验事实或冲突均不能报告资金完成。Task10 仍负责订单收尾、已核验终止的内部转换及工单最终关闭。
+
 ### 8.1 有边界的恢复
 
 不提供任意 `setStatus`。CONTINUE_EXCHANGE 方案经过确认和必要审批后，依据最新可信资金、物流、验收事实重新计算允许的下一状态，而不是盲目恢复 holdPreviousStatus。仍有活跃风险、资金未知或其他工单阻塞则拒绝恢复。

@@ -30,7 +30,7 @@ export class SimulatedProviderStore {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(INTEGRATION_CONFIG) private readonly config: IntegrationConfiguration = integrationConfiguration(),
   ) {}
-  assertEnabled(channel: 'payment' | 'logistics'): void { if (this.config[channel] !== 'simulated' || !this.config.signingKey) throw integrationUnavailable(); }
+  assertEnabled(channel: 'payment' | 'logistics'): void { if (!['development', 'test'].includes(process.env.NODE_ENV ?? '') || this.config[channel] !== 'simulated' || !this.config.signingKey) throw integrationUnavailable(); }
   verifySignedEvent(raw: string, signature: string, channel: 'payment' | 'logistics'): VerifiedIntegrationEvent {
     this.assertEnabled(channel);
     if (Buffer.byteLength(raw) > 8192 || !/^[a-f0-9]{64}$/.test(signature)) throw invalid();
@@ -56,7 +56,7 @@ export class SimulatedProviderStore {
     if (logistics(operation.kind)) {
       if (!z.object({ shipmentId: z.uuid(), carrier: z.string().min(1), trackingNumber: z.string().min(1) }).safeParse(operation.payload).success) throw invalid();
     } else if (!payment.success) throw invalid();
-    const isEffect = !logistics(operation.kind) && operation.kind !== 'CREATE_PAYMENT';
+    const isEffect = !logistics(operation.kind) && !['CREATE_PAYMENT', 'CREATE_COMPENSATION'].includes(operation.kind);
     const paymentBusinessNo = operation.payload.paymentBusinessNo;
     if (isEffect && (typeof paymentBusinessNo !== 'string' || !paymentBusinessNo || paymentBusinessNo === operation.businessNo)) throw invalid();
     // This ALWAYS uses the root client. No caller order transaction is accepted.
@@ -69,9 +69,9 @@ export class SimulatedProviderStore {
       const source = await tx.simulatedProviderOperation.findUnique({ where: { businessNo: paymentBusinessNo as string } });
       const sourcePayload = source?.payload as Prisma.JsonObject | undefined;
       let result: ProviderResult;
-      if (!source || source.kind !== 'CREATE_PAYMENT' || source.orderId !== operation.orderId || sourcePayload?.amountFen !== operation.payload.amountFen || sourcePayload?.currency !== operation.payload.currency) {
+      if (!source || source.kind !== (operation.kind.endsWith('_COMPENSATION') ? 'CREATE_COMPENSATION' : 'CREATE_PAYMENT') || source.orderId !== operation.orderId || sourcePayload?.amountFen !== operation.payload.amountFen || sourcePayload?.currency !== operation.payload.currency) {
         result = { status: 'FAILURE', reason: 'ORIGINAL_PAYMENT_MISMATCH' };
-      } else if (operation.kind === 'CLOSE_PAYMENT') {
+      } else if (['CLOSE_PAYMENT', 'CLOSE_COMPENSATION'].includes(operation.kind)) {
         if (source.status !== 'PENDING') result = { status: 'FAILURE', reason: 'PAYMENT_NOT_PENDING' };
         else {
           result = this.financialSuccess(operation, 'PAYMENT_CLOSED');
@@ -79,10 +79,11 @@ export class SimulatedProviderStore {
         }
       } else if (source.status !== 'SUCCESS') result = { status: 'FAILURE', reason: 'PAYMENT_NOT_PAID' };
       else {
-        const effect = await tx.simulatedProviderOperation.findFirst({ where: { kind: { in: ['REFUND_PAYMENT', 'SETTLE_DIFFERENCE'] }, status: 'SUCCESS', payload: { path: ['paymentBusinessNo'], equals: source.businessNo } } });
-        result = effect ? { status: 'FAILURE', reason: 'PAYMENT_ALREADY_DISPOSED' } : this.financialSuccess(operation, operation.kind === 'REFUND_PAYMENT' ? 'REFUND_SUCCEEDED' : 'DIFFERENCE_SETTLED');
+        const effect = await tx.simulatedProviderOperation.findFirst({ where: { kind: { in: ['REFUND_PAYMENT', 'SETTLE_DIFFERENCE', 'REFUND_COMPENSATION', 'DISBURSE_COMPENSATION'] }, status: 'SUCCESS', payload: { path: ['paymentBusinessNo'], equals: source.businessNo } } });
+        result = effect ? { status: 'FAILURE', reason: 'PAYMENT_ALREADY_DISPOSED' } : this.financialSuccess(operation, ['REFUND_PAYMENT', 'REFUND_COMPENSATION'].includes(operation.kind) ? 'REFUND_SUCCEEDED' : 'DIFFERENCE_SETTLED');
       }
       await tx.simulatedProviderOperation.update({ where: { id: row.id }, data: { status: result.status, result: json(result), externalTransactionId: result.status === 'SUCCESS' ? result.externalTransactionId : null } });
+      if (result.status === 'SUCCESS') await tx.simulatedProviderEvent.create({ data: { provider: result.event.provider, eventId: result.event.eventId, businessNo: result.event.businessNo, kind: result.event.kind, payload: result.event as unknown as Prisma.InputJsonObject } });
       return result;
     });
   }
@@ -98,7 +99,7 @@ export class SimulatedProviderStore {
       await tx.$queryRaw`SELECT id FROM "SimulatedProviderOperation" WHERE "businessNo" = ${event.businessNo} FOR UPDATE`;
       const row = await tx.simulatedProviderOperation.findUnique({ where: { businessNo: event.businessNo } });
       if (!row) throw invalid();
-      const durableReturn = event.kind === 'RETURN_PROGRESS' || event.kind === 'ORIGINAL_SHIPMENT_CLOSED';
+      const durableReturn = event.kind !== 'SHIPMENT_PROGRESS';
       if (durableReturn) {
         const accepted = await tx.simulatedProviderEvent.findUnique({ where: { provider_eventId: { provider: event.provider, eventId: event.eventId } } });
         // An accepted identity remains retryable after newer progress. Never
@@ -125,9 +126,10 @@ export class SimulatedProviderStore {
         }
       } else {
         // Effect confirmations are created by execute; test completion only pays an existing intent.
-        if (event.kind !== 'PAYMENT_SUCCEEDED' || row.kind !== 'CREATE_PAYMENT' || payload.amountFen !== event.amountFen || payload.currency !== event.currency || row.status === 'FAILURE') throw conflict();
+        if (event.kind !== 'PAYMENT_SUCCEEDED' || !['CREATE_PAYMENT', 'CREATE_COMPENSATION'].includes(row.kind) || payload.amountFen !== event.amountFen || payload.currency !== event.currency || row.status === 'FAILURE') throw conflict();
         if (row.status === 'SUCCESS') {
           if (row.externalTransactionId !== event.externalTransactionId) throw conflict();
+          await tx.simulatedProviderEvent.create({ data: { provider: event.provider, eventId: event.eventId, businessNo: event.businessNo, kind: event.kind, payload: event as unknown as Prisma.InputJsonObject } });
           return;
         }
       }

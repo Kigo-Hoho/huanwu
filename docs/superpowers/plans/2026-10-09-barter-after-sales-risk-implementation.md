@@ -173,6 +173,8 @@ it('pins the inclusive net compensation ceiling', () => {
 
 ### Task 9: 独立补偿支付、可信资金事实与原款退款
 
+Task9 实施契约澄清（2026-10-22）：增加严格客户补偿摘要/checkout 契约、独立金融事实恢复器、内部原款执行授权；返回现有 CaseCommandResult，支付 ID 通过客户工单详情摘要读取。退货执行器组合调用两领域规划，START 的订单收尾留给 Task10。新增金融 operation enum 与 inbox 扩展采用追加迁移；金融与退货恢复器分别按事件类型消费，旧被覆盖历史不可恢复。无公开补偿取消命令，内部关闭/退款能力在缺合法授权转换时保持不可发送；未知及冲突继续阻止资金完成。此澄清不修改本任务完成勾选，完成状态由控制代理审阅后记录。
+
 **Files:** Create `apps/api/src/compensation/{compensation.module,compensation.controller,compensation.service,compensation.port,compensation-outbox.handler,compensation-events.service,compensation-ledger,case-funds-status.service}.ts`；Modify `apps/api/src/integrations/{integration.types,simulated-provider.store,testing-integrations.controller}.ts`、`apps/api/src/payments/payment-outbox.handler.ts` 售后授权分支；Test `apps/api/test/phase4/{compensation,after-sales-financial-races}.e2e-spec.ts`。
 
 **Interfaces:** Produces `CompensationService.planInTransaction(ctx, resolution): Promise<void>`、`requestPayment(context): Promise<CaseCommandResult>`、`getCheckout(actor, caseId, paymentId): Promise<CompensationCheckoutView>`；`CompensationPort.create/query/close/refund/queryRefund/disburse/queryDisbursement` 采用现有 ProviderOperation/ProviderResult。`CompensationEventsService.applyVerified(event): Promise<void>`；`CaseFundsStatus = {complete:boolean;unknown:boolean;conflicting:boolean}`、`CaseFundsStatusService.inspect(tx, caseId): Promise<CaseFundsStatus>`（定义在本任务并供Task10使用）。

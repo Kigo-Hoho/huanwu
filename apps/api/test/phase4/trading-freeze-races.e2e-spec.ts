@@ -140,9 +140,21 @@ it('holds freeze behind a trading command that already owns restriction rows, in
   vi.spyOn(reservations, 'lockItems').mockImplementationOnce(async (tx, ids) => { reached(); await resume; return original(tx, ids); });
   const accepting = h.command(h.actors.recipient, `/api/proposals/${proposal.id}/accept`, { expectedVersion: 1 }).then(r => r);
   await atItems;
+  const freezeAtLock = Promise.withResolvers<void>();
+  const restrictions = h.app.get(TradingRestrictionsService); const realLock = restrictions.lock.bind(restrictions);
+  vi.spyOn(restrictions, 'lock').mockImplementationOnce(async (tx, ids) => {
+    // Deliberate arrival latency exceeds the unchanged observer window: this
+    // catches starting observation during grant/HTTP scheduling, before locking.
+    await delay(1500);
+    freezeAtLock.resolve();
+    return realLock(tx, ids);
+  });
   const freezing = desktop.action(`/api/admin/risk/users/${h.actors.initiator.id}/freeze`, 'FREEZE_TRADING', h.actors.initiator.id, { expectedVersion: 1, reason: '并发核验' });
   let waiting: boolean;
-  try { waiting = await observeRestrictionWait(); }
+  try {
+    await Promise.race([freezeAtLock.promise, freezing.then(() => { throw new Error('Freeze bypassed the restriction lock'); })]);
+    waiting = await observeRestrictionWait();
+  }
   finally { release(); }
   expect((await accepting).status).toBe(200);
   expect((await freezing).status).toBe(200);

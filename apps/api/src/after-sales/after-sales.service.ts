@@ -111,7 +111,7 @@ export class AfterSalesService {
       const value = await readCase(tx, id);
       const order = value ? await readOrder(tx, value.orderId) : null;
       assertCaseParticipant(order, value, actor.id);
-      return CaseDetailViewSchema.parse({ ...mapCase(value), records: value.records.map(record => mapCaseRecord(record, order!)), evidence: value.evidence.map(mapCaseEvidence), resolutions: value.resolutions.map(mapResolution) });
+      return CaseDetailViewSchema.parse({ ...mapCase(value), records: value.records.map(record => mapCaseRecord(record, order!)), evidence: value.evidence.map(mapCaseEvidence), resolutions: value.resolutions.map(mapResolution), compensation: value.resolutions.flatMap(r => r.compensationObligations.map(o => ({ obligationId: o.id, resolutionVersion: r.number, paymentId: o.payment?.id ?? null, payerSide: o.payerSide, payeeSide: o.payeeSide, amountFen: o.amountFen, currency: o.currency, paymentDeadline: o.paymentDeadline.toISOString(), status: o.progress?.status ?? 'UNKNOWN' }))) });
     }, { isolationLevel: 'RepeatableRead' });
   }
   async adminDetail(context: OperatorSessionContext, id: string) {

@@ -32,6 +32,9 @@ export default defineConfig({
     ],
     pool: 'forks',
     isolate: true,
+    // Bound this legacy multi-project runner's simultaneous PostgreSQL clones
+    // and Prisma connections; unlimited forks exhaust transaction-start budgets.
+    maxWorkers: 2,
     maxConcurrency: 1,
     hookTimeout: 60000,
     sequence: { hooks: 'stack' },

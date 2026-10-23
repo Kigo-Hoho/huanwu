@@ -6,6 +6,8 @@ export interface PaymentEffectPayload extends PaymentOperationPayload { paymentB
 export interface ShipmentOperationPayload { shipmentId: string; carrier: string; trackingNumber: string }
 interface EventIdentity { provider: string; eventId: string; businessNo: string; occurredAt: string }
 export type VerifiedIntegrationEvent = EventIdentity & (
+  // Original and independent compensation facts use the same financial event
+  // vocabulary; their canonical business numbers route to separate ledgers.
   | { kind: 'PAYMENT_SUCCEEDED' | 'PAYMENT_CLOSED' | 'REFUND_SUCCEEDED' | 'DIFFERENCE_SETTLED'; externalTransactionId: string; amountFen: number; currency: string }
   | { kind: 'SHIPMENT_PROGRESS'; shipmentId: string; progress: ShipmentStatus }
   | { kind: 'RETURN_PROGRESS'; shipmentId: string; progress: ShipmentStatus }

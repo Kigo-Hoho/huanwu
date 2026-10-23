@@ -103,6 +103,7 @@ export class PaymentEventsService {
       if (entryType === 'REFUND' && order.status === 'SETTLING' && intent.purpose !== 'DEPOSIT') { await reject('REFUND_CONTRADICTS_SETTLEMENT', true); return; }
       await tx.financialEntry.create({ data: { intentId: intent.id, integrationEventId: recorded.id, entryType, provider: event.provider, externalTransactionId: event.externalTransactionId, businessNo: event.businessNo, amountFen: intent.amountFen, currency: 'CNY', occurredAt: new Date(event.occurredAt) } });
       if (entryType !== 'PAYMENT') {
+        await tx.resolutionExecutionProgress.updateMany({ where: { execution: { executionStep: `CLAIM:${event.businessNo}`, originalPaymentIntentId: intent.id } }, data: { status: 'SUCCEEDED', completedAt: new Date(event.occurredAt) } });
         if (entryType === 'REFUND') await tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'REFUNDED', refundedAt: new Date(event.occurredAt) } });
         await receipt('PROCESSED', order.status === 'ON_HOLD' ? 'ORDER_ON_HOLD' : null);
         const finalized = order.status === 'SETTLING' ? await this.settlement.tryFinalize(tx, order.id, now) : await this.cancellation.tryFinalize(tx, order.id, now);

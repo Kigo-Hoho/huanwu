@@ -52,7 +52,7 @@ export class ResolutionExecutionService {
   }
 }
 
-async function lockExecutionAuthorities(tx: CaseTx, ids: string[]): Promise<string[]> {
+export async function lockExecutionAuthorities(tx: CaseTx, ids: string[]): Promise<string[]> {
   // All identities (including the executor) use one sorted order before the
   // shared session locks. Existing child rows need their own revocation fences;
   // a child DELETE/UPDATE need not touch User. Keep parent locks shared to avoid

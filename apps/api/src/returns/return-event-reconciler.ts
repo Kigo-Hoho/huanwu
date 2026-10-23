@@ -35,7 +35,7 @@ export class ReturnEventReconciler implements OnModuleInit, OnModuleDestroy {
   private async dispatch(): Promise<void> {
     const pending = await this.prisma.$queryRaw<{ payload: unknown }[]>`
       SELECT p.payload FROM "SimulatedProviderEvent" p
-      WHERE NOT EXISTS (
+      WHERE p.kind IN ('RETURN_PROGRESS', 'ORIGINAL_SHIPMENT_CLOSED') AND NOT EXISTS (
         SELECT 1 FROM "IntegrationEvent" e JOIN "IntegrationEventReceipt" r ON r."eventId" = e.id
         WHERE e.provider = p.provider AND e."eventId" = p."eventId" AND r.status IN ('PROCESSED', 'REJECTED')
       ) ORDER BY p.id LIMIT 100`;

@@ -14,6 +14,7 @@ import { ProposalExpiryScheduler } from '../../../src/proposals/proposal-expiry.
 import { OrderExpiryScheduler } from '../../../src/orders/order-expiry.scheduler.js';
 import { OutboxWorker } from '../../../src/integrations/outbox.worker.js';
 import { ReturnEventReconciler } from '../../../src/returns/return-event-reconciler.js';
+import { FinancialEventReconciler } from '../../../src/compensation/financial-event-reconciler.js';
 import { createPhase3Database } from './database-fixtures.js';
 
 export class MutableClock implements Clock {
@@ -48,6 +49,7 @@ export async function createOrderHarness() {
     .overrideProvider(CLOCK).useValue(clock)
     .overrideProvider(OutboxWorker).useValue({})
     .overrideProvider(ReturnEventReconciler).useValue({})
+    .overrideProvider(FinancialEventReconciler).useValue({})
     .overrideProvider(OrderExpiryScheduler).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
   app = module.createNestApplication();
