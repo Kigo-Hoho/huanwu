@@ -147,6 +147,13 @@ export class RiskReportService {
       return TradingRestrictionViewSchema.parse({ status: value?.status ?? 'CLEAR', version: value?.version ?? 1, reason: value?.reason ?? null });
     });
   }
+  async myRestriction(actor: AuthenticatedUser) {
+    return this.prisma.$transaction(async tx => {
+      await assertCurrentCustomer(tx, actor);
+      const value = await tx.tradingRestriction.findUnique({ where: { userId: actor.id } });
+      return TradingRestrictionViewSchema.parse({ status: value?.status ?? 'CLEAR', version: value?.version ?? 1, reason: value?.reason ?? null });
+    });
+  }
   private async authorize(tx: Prisma.TransactionClient, actor: AuthenticatedUser | OperatorSessionContext) {
     if ('sessionId' in actor) { await this.sessions.assertCurrent(tx, actor, 'MOBILE_LIMITED'); assertRiskRole(actor); }
     else await assertCurrentCustomer(tx, actor);

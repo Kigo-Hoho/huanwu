@@ -42,6 +42,13 @@ interface AuthorizedResponse<T> {
 
 export type RequestPort = (options: RequestOptions) => Promise<RequestResult>;
 export type OrderRequestPath = `/api/orders/${string}` | `/api/me/orders${string}` | `/api/proposals/${string}/order` | `/api/testing/payments/${string}/complete` | `/api/testing/shipments/${string}/progress`;
+export type AfterSalesRequestPath =
+  | `/api/orders/${string}/after-sales`
+  | `/api/after-sales${string}`
+  | `/api/evidence/${string}/content?variant=${'preview' | 'original'}`
+  | `/api/reports${string}`
+  | `/api/me/trading-restriction`
+  | `/api/testing/compensation/${string}/complete`;
 
 interface AuthSessionResponse {
   accessToken: string;
@@ -132,7 +139,39 @@ export class AuthenticatedApiClient {
     this.session.setAccessToken(response.accessToken, response.expiresIn, validUser(response.user) ? response.user.id : null);
   }
 
-  createItem(input: CreateItem): Promise<ItemView> {
+
+  async afterSalesMultipart(path: AfterSalesRequestPath, build: (token: string) => Promise<{ statusCode: number; data: unknown }>, key?: string): Promise<unknown> {
+    const initiating = this.session.getIdentity();
+    const check = () => {
+      const current = this.session.getIdentity();
+      if (!initiating.actorId || current.actorId !== initiating.actorId || current.epoch !== initiating.epoch) throw new OrderIdentityChangedError();
+    };
+    check();
+    let token = this.session.getAccessToken();
+    const execute = async () => {
+      check(); token = this.session.getAccessToken(); if (!token) throw new Error('Customer authentication is required.');
+      const result = await build(token);
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        throw new ApiClientError(errorMessage(result.data), result.statusCode, result.data);
+      }
+      let data = result.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch { /* keep text for error surfaces */ }
+      }
+      return data;
+    };
+    try {
+      if (!token) { await this.refreshSession(token); check(); }
+      try { const value = await execute(); check(); return value; }
+      catch (cause) {
+        check();
+        if (!(cause instanceof ApiClientError) || cause.statusCode !== 401) throw cause;
+        await this.refreshSession(token); check(); const value = await execute(); check(); return value;
+      }
+    } catch (cause) { check(); throw cause; }
+  }
+
+    createItem(input: CreateItem): Promise<ItemView> {
     return this.authorized<ItemView>('/api/items', 'POST', CreateItemSchema.parse(input));
   }
 
@@ -169,8 +208,48 @@ export class AuthenticatedApiClient {
     return me;
   }
 
-  // Dedicated composition seam; validation and logical keys belong to OrderApi.
+  // Dedicated composition seam; validation and logical keys belong to OrderApi / AfterSalesApi.
   async orderRequest(path: OrderRequestPath, method: 'GET' | 'POST', data?: unknown, key?: string): Promise<unknown> {
+    return this.identityBoundRequest(path, method, data, key);
+  }
+
+  async afterSalesRequest(path: AfterSalesRequestPath, method: 'GET' | 'POST', data?: unknown, key?: string): Promise<unknown> {
+    return this.identityBoundRequest(path, method, data, key);
+  }
+
+  async afterSalesBinary(path: AfterSalesRequestPath): Promise<ArrayBuffer> {
+    const initiating = this.session.getIdentity();
+    const check = () => {
+      const current = this.session.getIdentity();
+      if (!initiating.actorId || current.actorId !== initiating.actorId || current.epoch !== initiating.epoch) throw new OrderIdentityChangedError();
+    };
+    check();
+    let token = this.session.getAccessToken();
+    const execute = async () => {
+      check(); token = this.session.getAccessToken(); if (!token) throw new Error('Customer authentication is required.');
+      const result = await this.request({
+        url: `${this.baseUrl.replace(/\/$/, '')}${path}`,
+        method: 'GET',
+        header: { Authorization: `Bearer ${token}` },
+        responseType: 'arraybuffer',
+      } as RequestOptions & { responseType: string });
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        throw new ApiClientError(errorMessage(result.data), result.statusCode, result.data);
+      }
+      return result.data as ArrayBuffer;
+    };
+    try {
+      if (!token) { await this.refreshSession(token); check(); }
+      try { const value = await execute(); check(); return value; }
+      catch (cause) {
+        check();
+        if (!(cause instanceof ApiClientError) || cause.statusCode !== 401) throw cause;
+        await this.refreshSession(token); check(); const value = await execute(); check(); return value;
+      }
+    } catch (cause) { check(); throw cause; }
+  }
+
+  private async identityBoundRequest(path: string, method: 'GET' | 'POST', data?: unknown, key?: string): Promise<unknown> {
     const initiating = this.session.getIdentity();
     const check = () => {
       const current = this.session.getIdentity();
