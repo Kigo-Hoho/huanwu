@@ -52,12 +52,13 @@ function buildDraft(
               : ('RETURN_ORIGINAL' as const),
         }))
       : [];
+  const terminal = context.orderStatus === 'COMPLETED' || context.orderStatus === 'CANCELLED';
   const orderOutcome =
     type === 'CONTINUE_EXCHANGE'
       ? ('RESUME' as const)
       : type === 'KEEP_WITH_COMPENSATION'
         ? ('COMPLETE' as const)
-        : type === 'FUNDS_ONLY'
+        : type === 'FUNDS_ONLY' || terminal
           ? ('PRESERVE_TERMINAL' as const)
           : ('CANCEL' as const);
   return {
@@ -66,7 +67,7 @@ function buildDraft(
     resolutionVersion: (detail.currentResolutionVersion ?? 0) + 1,
     type,
     reason,
-    rulesVersion: 'phase4-admin-v1',
+    rulesVersion: 'phase4-simulation-v1',
     evidenceIds: detail.evidence.map((item) => item.id),
     itemSnapshotIds: snapshots.map((item) => item.id),
     responsibility: 'UNDETERMINED',

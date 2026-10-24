@@ -9,12 +9,13 @@ const statusLabels: Record<string, string> = {
 };
 
 export function ReturnActions({
-  detail, returns, orderVersion, busy, onRegister, onConfirm,
+  detail, returns, orderVersion, busy, mySide, onRegister, onConfirm,
 }: {
   detail: CaseDetailView;
   returns: ReturnView[];
   orderVersion: number;
   busy: boolean;
+  mySide: import('@barter/contracts').OrderSide | null;
   onRegister: (input: { expectedCaseVersion: number; expectedOrderVersion: number; resolutionVersion: number; obligationIds: string[]; obligationVersions: { obligationId: string; expectedVersion: number }[]; carrier: string; trackingNumber: string }) => void;
   onConfirm: (input: { expectedCaseVersion: number; expectedOrderVersion: number; resolutionVersion: number; obligationId: string; expectedObligationVersion: number; decision: 'CONFIRM' | 'DISPUTE'; reason?: string }) => void;
 }) {
@@ -22,8 +23,9 @@ export function ReturnActions({
   const [tracking, setTracking] = useState('');
   const [disputeReason, setDisputeReason] = useState('');
   const resolutionVersion = detail.currentResolutionVersion ?? 1;
-  const pending = returns.filter(r => r.status === 'PENDING');
-  const deliverable = returns.filter(r => ['DELIVERED', 'REGISTERED', 'COLLECTED'].includes(r.status));
+  // Only the actual holder may register; only the original owner may confirm.
+  const pending = returns.filter(r => r.status === 'PENDING' && (!mySide || r.holderSide === mySide));
+  const deliverable = returns.filter(r => ['DELIVERED', 'REGISTERED', 'COLLECTED'].includes(r.status) && (!mySide || r.ownerSide === mySide));
   const abnormal = returns.filter(r => ['DISPUTED', 'UNKNOWN', 'UNRETURNABLE'].includes(r.status));
   return <View>
     <Text>退货进度</Text>

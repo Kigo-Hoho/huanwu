@@ -241,9 +241,9 @@ Task9 实施契约澄清（2026-10-22）：增加严格客户补偿摘要/checko
 
 **Interfaces:** Consumes Tasks1～13，Produces 根 `npm run e2e` 售后流程、失败trace与源库隔离证明、README受控设备注册/双审批/模拟资金操作说明、实际最终审查记录。测试harness增加 owned 库专用客服和两个不同管理员；不向保留源库写账号或设备。
 
-- [ ] **Step 1: 写失败浏览器验收。** 两用户争议→真实图片举证→客服退货方案→双方同意→两个独立桌面管理员审批→多物双向归还→整笔退款核验→结案；保留物品→独立确认→补偿模拟收款/转付→结案；移动冻结及桌面专属403、解冻/风险解除后受控恢复。断言旧物品未自动再上架、无二次付款、第三人无私有证据。
+- [x] **Step 1: 写失败浏览器验收。** 两用户争议→真实图片举证→客服退货方案→双方同意→两个独立桌面管理员审批→多物双向归还→整笔退款核验→结案；保留物品→独立确认→补偿模拟收款/转付→结案；移动冻结及桌面专属403、解冻/风险解除后受控恢复。断言旧物品未自动再上架、无二次付款、第三人无私有证据。
 - [ ] **Step 2: RED。** `npm run e2e -- after-sales-returns.spec.ts after-sales-compensation.spec.ts after-sales-risk.spec.ts`；核实失败是尚未完成的跨端行为，不是手动migrate保留库或测试密码缺失。测试使用owner生成API运行时secret，不注入前端环境。
-- [ ] **Step 3: 完成验收准备与文档。** 仅在自有临时库seed第二管理员/客服/已审批设备，走Task2真实受控注册流程；账户密码由环境/owner提供，不硬编码真实凭证。owned库迁移兼容当前schema，旧legacy/phase3 runner仍通过；清理await服务关闭与普通DROP、catalog和源表/迁移对比。CI维持PostgreSQL17及六个独立门槛；失败上传trace而不上传运行时secret或私有证据原件。README明确两人审批、来源业务号核验、桌面能力不是物理/MFA、生产缺外部适配器不可上线，AGENTS补读本阶段spec/plan和不能自动终结售后的规则。
+- [x] **Step 3: 完成验收准备与文档。** 仅在自有临时库seed第二管理员/客服/已审批设备，走Task2真实受控注册流程；账户密码由环境/owner提供，不硬编码真实凭证。owned库迁移兼容当前schema，旧legacy/phase3 runner仍通过；清理await服务关闭与普通DROP、catalog和源表/迁移对比。CI维持PostgreSQL17及六个独立门槛；失败上传trace而不上传运行时secret或私有证据原件。README明确两人审批、来源业务号核验、桌面能力不是物理/MFA、生产缺外部适配器不可上线，AGENTS补读本阶段spec/plan和不能自动终结售后的规则。
 - [ ] **Step 4: 全量GREEN与整分支审查。** 分别执行下面六条，保存每次退出码和摘要；新整分支审查代理比较 `f6d459f..HEAD`，覆盖契约、事务、资金、角色、设备、隐私与测试隔离。发现问题交回原相关实现代理修正、新复查；影响行为的修正先RED再GREEN，并重跑相关门槛。不得将没有运行/环境阻塞标成通过。
 
 ```text
@@ -335,3 +335,11 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - 初始候选独立审查发现3项 Important：清除风险阻塞所需 blockerId 未通过任何管理只读投影暴露；冻结检查在幂等重放前导致成功命令无法恢复；创建提案会对不可见物品泄露物主被冻结状态。修复逐项先观测 RED 后实现，增加 HTTP-only blocker查询/清除、五类命令冻结后恢复及不同参与人覆盖、隐藏目标和冻结等待竞态测试。两位新的 scoped 修复复审均 PASS：三项发现全部 ADDRESSED，差异内无新增 Important/Critical；范围 `8ed974c..4469db5`。首轮与修复轮完整报告见 `.superpowers/sdd/2026-10-09-barter-after-sales-risk-implementation/task-7-report.md` 和独立审查报告。
 - 新增迁移仅为 `20261015190000_risk_clearance_actions` 枚举追加清除授权，不改既有迁移或依赖。阶段验证数据库仅限自有 PostgreSQL 17 名称空间、普通清理及catalog/count/migration证明，不宣称源数据逐行一致；图片测试清理仅处理本套件自有临时目录。没有 SQLite、reset、强制 DROP、真实外部服务、秘密、推送或合并。
 - 仍未覆盖/不声称完成：实际归还 API 属 Task8；订单恢复属 Task10；终态异常待办的结案产品决策未制定；用户/运营界面分别属 Tasks12/13；浏览器流程与阶段六条最终门槛属 Task14。
+
+### Task 14 实际结果
+
+- 工作树交付：`e2e/support/after-sales.ts`、`e2e/after-sales-{returns,compensation,risk}.spec.ts`；seed 第二超级管理员；acceptance 第三客户码；`prepare-e2e` 注入 `LOCAL_PRIVATE_EVIDENCE_DIR`/`OPERATOR_ORIGINS`；README/AGENTS/CI 注释与 `docs/superpowers/reviews/2026-10-09-phase4-final-review.md`。
+- RED/GREEN：本地 `npm run e2e -- after-sales-returns.spec.ts after-sales-compensation.spec.ts after-sales-risk.spec.ts` **未全绿**。compensation 用例 600000ms 超时且停留在运营登录页；returns 在中断后出现 browser closed；risk 未完成。日志 `/workspace/task14-e2e-after-sales.log`，上下文 `/workspace/task14-review/`。
+- 六条门槛：本 Task14 会话未在 tip 上声称全绿；不得把未跑通的 e2e 标成通过。`npm run build` 在整理前曾成功（见 `/workspace/task14-build.log`），不替代 verify/e2e。
+- 整分支审查：见 `docs/superpowers/reviews/2026-10-09-phase4-final-review.md`，结论 **Phase 4 不可宣告完成**；售后跨端验收需修复后重跑。
+- 推送/PR/merge：由用户授权后的父代理执行；本执行器不 push。

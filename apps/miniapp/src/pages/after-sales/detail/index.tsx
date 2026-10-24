@@ -206,6 +206,7 @@ export function AfterSalesDetailPage({
         returns={returns}
         orderVersion={orderVersion}
         busy={busy || !customer}
+        mySide={mySide}
         onRegister={input => { void run('registerReturn', input); }}
         onConfirm={input => { void run('confirmReturn', input); }}
       />

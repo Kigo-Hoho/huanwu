@@ -11,6 +11,7 @@ export class AcceptanceIdentityProvider implements CustomerIdentityProvider {
     const identities: Record<string, string> = {
       'e2e-customer-code': 'local-seed-customer',
       'e2e-customer-two-code': 'local-seed-customer-two',
+      'e2e-customer-three-code': 'local-seed-customer-three',
     };
     const openid = Object.hasOwn(identities, code) ? identities[code] : undefined;
     if (!openid) {

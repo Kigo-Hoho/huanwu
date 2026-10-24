@@ -24,7 +24,7 @@ async function atStage(stage, run) {
   catch (error) { if (error instanceof AcceptanceStageError) throw error; throw new AcceptanceStageError(stage, error); }
 }
 
-export function acceptanceEnvironment(source, databaseUrl, storageDirectory) {
+export function acceptanceEnvironment(source, databaseUrl, storageDirectory, evidenceDirectory = `${storageDirectory}-private-evidence`) {
   try {
     const name = phase3DatabaseName(databaseUrl);
     validateDatabaseName(name, name.match(/^(barter_p3_[a-f0-9]{16}_)/)?.[1] ?? '');
@@ -40,6 +40,8 @@ export function acceptanceEnvironment(source, databaseUrl, storageDirectory) {
     ADDRESS_ENCRYPTION_KEY_VERSION: 'acceptance-v1',
     SIMULATED_INTEGRATION_SIGNING_KEY_BASE64: randomBytes(32).toString('base64'),
     LOCAL_IMAGE_STORAGE_DIR: storageDirectory,
+    LOCAL_PRIVATE_EVIDENCE_DIR: evidenceDirectory,
+    OPERATOR_ORIGINS: 'http://127.0.0.1:5173,http://localhost:5173',
   };
   return { api, frontend, browser: { ...frontend, E2E_REVIEWER_PASSWORD: source.E2E_REVIEWER_PASSWORD, BARTER_E2E_API_ENV: JSON.stringify(api), BARTER_E2E_DATABASE_NAME: phase3DatabaseName(databaseUrl), BARTER_E2E_SOURCE_DATABASE_NAME: phase3DatabaseName(source.DATABASE_URL) } };
 }
@@ -99,9 +101,10 @@ async function main(args) {
   const database = await createOwnedDatabase(source, namespace);
   await withOwnedDatabase(database, async () => {
     const images = await mkdtemp(join(tmpdir(), 'barter-e2e-images-'));
+    const evidence = await mkdtemp(join(tmpdir(), 'barter-e2e-evidence-'));
     try {
       await applyMigrations(database.url);
-      const env = acceptanceEnvironment(process.env, database.url, images);
+      const env = acceptanceEnvironment(process.env, database.url, images, evidence);
       const npm = process.env.npm_execpath;
       await command([npm, 'run', 'db:seed'], env.api);
       await command([npm, 'run', 'build', '--workspace', '@barter/api'], env.api);
@@ -111,7 +114,10 @@ async function main(args) {
         TARO_APP_INTEGRATION_MODE: 'simulated',
       });
       await command([resolve(root, 'node_modules/@playwright/test/cli.js'), 'test', '--config', 'e2e/playwright.config.ts', ...args], env.browser);
-    } finally { await atStage('cleanup', () => rm(images, { recursive: true })); }
+    } finally {
+      await atStage('cleanup', () => rm(images, { recursive: true }));
+      await atStage('cleanup', () => rm(evidence, { recursive: true }));
+    }
   }, async () => {
     await catalogProof(source, namespace);
     assert.deepEqual(await sourceSnapshot(source), before, 'Source public table counts and migrations must remain unchanged');

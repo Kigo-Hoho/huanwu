@@ -164,3 +164,33 @@ Phase 2 的 CONFIRMED 表示最新方案的所有 2～6 件物品被独占占用
 本地适配器的有界回收每分钟运行一次，每轮最多检查 10 个 `OPEN` 和 10 个 `READY` 任务，每项最多 18 个对象；游标轮转避免旧待核验任务挡住新任务。测试关闭定时器，通过 `EvidenceCleanupService.drain(limit)` 显式验证。`OPEN` 不按时间自动删除：只在同主机和相同存储目录 scope，且本实例已确认请求结束，或原 PID 已明确退出时恢复。存活／复用 PID、不同主机或目录、无法判断的进程以及归属确认失败均保留待人工核验，不扫描目录猜测文件归属。迁移 `20261012160000_private_evidence_cleanup_jobs` 只新增内部任务表；生产缺私有适配器时不会启用本地回收。
 
 API 新增 `sharp`，当前锁定 0.35.5。保留平台可选原生依赖；当前安装版本没有 `preinstall/install/postinstall` 生命周期脚本，未增加无用的 npm `allowScripts`。实际解码与元数据限制参照 [sharp 构造选项](https://sharp.pixelplumbing.com/api-constructor/)、[输出说明](https://sharp.pixelplumbing.com/api-output/)及[安装文档](https://sharp.pixelplumbing.com/install/)。
+
+## Phase 4 售后与风控验收
+
+第四阶段在受控模拟下增加售后工单、退货/补偿、双管理员资金批准与风险冻结。真实支付、物流、生产私有存储和正式设备认证仍未接入；模拟通过不等于可上线。
+
+### 受控运营账号与设备
+
+`npm run db:seed` / E2E owned 库 seed 会创建（密码仅来自 `ADMIN_SEED_PASSWORD`，仓库无明文）：
+
+| 邮箱 | 角色 |
+| --- | --- |
+| `super-admin@barter.local` | SUPER_ADMIN |
+| `super-admin-two@barter.local` | SUPER_ADMIN（第二审批人） |
+| `operations@barter.local` | OPERATIONS（客服起草，不可资金批准/执行） |
+| `reviewer@barter.local` | REVIEWER |
+
+浏览器验收只在当次 `barter_p3_*` owned 库 seed 上述账号，并走真实受控设备登记：首次桌面设备用 API CLI `approve-operator-device` bootstrap；第二台桌面设备必须由已具备 `DESKTOP_PRIVILEGED` 的另一超级管理员经 `APPROVE_DEVICE` 批准。不向保留源库写入账号或设备。桌面能力表示经批准的运营会话能力，**不是**物理设备绑定或 MFA。
+
+资金方案需要**两名不同**超级管理员桌面会话分别重新验证后批准，起草者不得自批；客服与移动/`MOBILE_LIMITED` 会话不能批准或执行资金。执行前核验原支付业务号与 outbox 事实；后台资金/物流动作为模拟，不会发起真实扣款或寄递。
+
+### 售后浏览器用例
+
+`e2e/after-sales-returns.spec.ts`、`e2e/after-sales-compensation.spec.ts`、`e2e/after-sales-risk.spec.ts` 与 `e2e/support/after-sales.ts` 覆盖退货双审批、保留补偿、移动冻结与桌面解冻。第三人身份码 `e2e-customer-three-code` 仅用于证明无私有证据访问。失败时 Playwright 保留 trace；CI 上传 `test-results/` 七天，**不得**把运行时 secret、私有证据原件或 `.env` 打进制品。
+
+```powershell
+npm run e2e -- after-sales-returns.spec.ts after-sales-compensation.spec.ts after-sales-risk.spec.ts
+```
+
+`prepare-e2e` 为 API 注入 `LOCAL_PRIVATE_EVIDENCE_DIR` 与 `OPERATOR_ORIGINS`（含 `http://127.0.0.1:5173`），不把这些值注入前端构建环境。
+
