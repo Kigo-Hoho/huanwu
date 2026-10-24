@@ -9,6 +9,7 @@ import { defaultSessionStorage } from '../features/auth/session-storage';
 import { ImageUploadClient } from '../features/images/image-upload.client';
 import { AuthenticatedApiClient } from './api-client';
 import { OrderApi } from '../features/orders/order-api';
+import { AfterSalesApi } from '../features/after-sales/after-sales-api';
 
 const baseUrl = typeof __API_BASE_URL__ === 'string' ? __API_BASE_URL__ : 'http://localhost:3000';
 const session = new Session(defaultSessionStorage);
@@ -21,6 +22,7 @@ export const defaultIdentityProvider: IdentityCodeProvider = createIdentityCodeP
 });
 export const defaultApiClient = new AuthenticatedApiClient(baseUrl, session);
 export const defaultOrderApi = new OrderApi(defaultApiClient);
+export const defaultAfterSalesApi = new AfterSalesApi(defaultApiClient, { baseUrl });
 export const defaultImageUploadClient = new ImageUploadClient(baseUrl, session);
 
 export async function chooseItemImages(): Promise<string[]> {

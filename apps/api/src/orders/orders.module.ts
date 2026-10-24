@@ -17,5 +17,6 @@ import { OrderExpiryService } from './order-expiry.service.js';
 import { OrderExpiryScheduler } from './order-expiry.scheduler.js';
 import { AdminOrdersController } from './admin-orders.controller.js';
 import { AdminOrdersService } from './admin-orders.service.js';
-@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController, AdminOrdersController], providers: [OrdersService, AdminOrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService, OrderCancellationEngine, OrderHoldService, OrderExpiryService, OrderExpiryScheduler], exports: [OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService, OrderHoldService, OrderExpiryService] })
+import { OrderFactsService } from './order-facts.service.js';
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ProposalsModule, ReservationsModule, IntegrationsModule], controllers: [OrdersController, AdminOrdersController], providers: [OrderFactsService, OrdersService, AdminOrdersService, OrderCommandsService, AddressCipher, OrderAddressService, OrderCancellationService, OrderCancellationEngine, OrderHoldService, OrderExpiryService, OrderExpiryScheduler], exports: [OrderFactsService, OrdersService, OrderCommandsService, OrderAddressService, OrderCancellationService, OrderHoldService, OrderExpiryService] })
 export class OrdersModule {}

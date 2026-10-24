@@ -15,6 +15,11 @@ import { ReviewQueuePage } from '../features/review/review-queue-page';
 import { ProposalListPage, ProposalDetailPage } from '../features/proposals/proposal-pages';
 import { OrderListPage } from '../features/orders/order-list-page';
 import { OrderDetailPage } from '../features/orders/order-detail-page';
+import { CaseListPage } from '../features/after-sales/case-list-page';
+import { CaseDetailPage } from '../features/after-sales/case-detail-page';
+import { RiskReportListPage, RiskReportDetailPage, RiskTaskListPage, RiskActionPage } from '../features/risk/risk-pages';
+import { DevicePage } from '../features/security/device-page';
+import { adminAfterSalesApi } from '../lib/after-sales-api';
 import {
   ApiError,
   apiClient,
@@ -52,7 +57,7 @@ function OperatorLayout({
           </Button>
         </div>
       </Header>
-      <nav className="workspace-nav"><Link to="/reviews">物品审核</Link><Link to="/proposals">交换提案</Link><Link to="/orders">订单查询</Link></nav>
+      <nav className="workspace-nav"><Link to="/reviews">物品审核</Link><Link to="/proposals">交换提案</Link><Link to="/orders">订单查询</Link><Link to="/after-sales">售后工单</Link><Link to="/risk/reports">风险举报</Link><Link to="/risk/actions">单项处置</Link><Link to="/security/devices">运营设备</Link></nav>
       <div className="ant-layout-content">{children}</div>
     </Layout>
   );
@@ -130,6 +135,7 @@ function RouterContent() {
               user={session}
               onLogout={() => {
                 apiClient.logout();
+                adminAfterSalesApi.clearSensitiveState();
                 setSession(null);
               }}
             >
@@ -148,6 +154,7 @@ function RouterContent() {
               user={session}
               onLogout={() => {
                 apiClient.logout();
+                adminAfterSalesApi.clearSensitiveState();
                 setSession(null);
               }}
             >
@@ -159,8 +166,14 @@ function RouterContent() {
         }
       />
       <Route path="*" element={<Navigate to={session ? '/reviews' : '/login'} replace />} />
-      {['/proposals', '/proposals/:proposalId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); setSession(null); }}>{path === '/proposals' ? <ProposalListPage /> : <ProposalDetailPage />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
-      {['/orders', '/orders/:orderId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); setSession(null); }}>{path === '/orders' ? <OrderListPage /> : <OrderDetailPage />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
+      {['/proposals', '/proposals/:proposalId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}>{path === '/proposals' ? <ProposalListPage /> : <ProposalDetailPage />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
+      {['/orders', '/orders/:orderId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}>{path === '/orders' ? <OrderListPage /> : <OrderDetailPage />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
+      {['/after-sales', '/after-sales/:caseId'].map(path => <Route key={path} path={path} element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}>{path === '/after-sales' ? <CaseListPage /> : <CaseDetailPage currentRoles={session.roles} />}</OperatorLayout> : <Navigate to="/login" replace />} />)}
+      <Route path="/risk/reports" element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}><RiskReportListPage /></OperatorLayout> : <Navigate to="/login" replace />} />
+      <Route path="/risk/reports/:reportId" element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}><RiskReportDetailPage /></OperatorLayout> : <Navigate to="/login" replace />} />
+      <Route path="/risk/tasks" element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}><RiskTaskListPage /></OperatorLayout> : <Navigate to="/login" replace />} />
+      <Route path="/risk/actions" element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}><RiskActionPage currentRoles={session.roles} /></OperatorLayout> : <Navigate to="/login" replace />} />
+      <Route path="/security/devices" element={session ? <OperatorLayout user={session} onLogout={() => { apiClient.logout(); adminAfterSalesApi.clearSensitiveState(); setSession(null); }}><DevicePage /></OperatorLayout> : <Navigate to="/login" replace />} />
     </Routes>
   );
 }

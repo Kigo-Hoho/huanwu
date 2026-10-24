@@ -8,6 +8,7 @@ import { AdminProposalsController } from './admin-proposals.controller.js';
 import { ClockModule } from '../common/clock.module.js';
 import { ReservationsModule } from '../reservations/reservations.module.js';
 import { ProposalOrderHandoffService } from './proposal-order-handoff.service.js';
+import { TradingRestrictionsModule } from '../risk/trading-restrictions.module.js';
 
-@Module({ imports: [AuthModule, AuditModule, ClockModule, ReservationsModule], controllers: [ProposalsController, AdminProposalsController], providers: [ProposalsService, ProposalExpiryScheduler, ProposalOrderHandoffService], exports: [ProposalsService, ProposalOrderHandoffService] })
+@Module({ imports: [AuthModule, AuditModule, ClockModule, ReservationsModule, TradingRestrictionsModule], controllers: [ProposalsController, AdminProposalsController], providers: [ProposalsService, ProposalExpiryScheduler, ProposalOrderHandoffService], exports: [ProposalsService, ProposalOrderHandoffService] })
 export class ProposalsModule {}

@@ -10,6 +10,9 @@ export default defineAppConfig({
     'pages/proposals/detail/index',
     'pages/orders/list/index',
     'pages/orders/detail/index',
+    'pages/after-sales/list/index',
+    'pages/after-sales/create/index',
+    'pages/after-sales/detail/index',
   ],
   window: {
     navigationBarTitleText: '以物换物',

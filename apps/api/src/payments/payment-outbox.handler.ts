@@ -12,6 +12,7 @@ import { OrderCancellationService } from '../orders/order-cancellation.service.j
 import { ReservationsService } from '../reservations/reservations.service.js';
 import { readOrder } from '../orders/order-reader.js';
 import { OrderExpiryService } from '../orders/order-expiry.service.js';
+import { authorizeOriginalFunds } from '../compensation/original-funds-authorization.js';
 
 @Injectable()
 export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModuleInit {
@@ -30,6 +31,7 @@ export class PaymentOutboxHandler implements IntegrationOperationHandler, OnModu
   onModuleInit(): void { for (const kind of ['CREATE_PAYMENT', 'CLOSE_PAYMENT', 'REFUND_PAYMENT', 'SETTLE_DIFFERENCE'] as const) this.registry.register(kind, this); }
   async authorize(operation: ProviderOperation): Promise<boolean> {
     if (this.config.payment === 'disabled') return false;
+    if (operation.payload.caseId) return authorizeOriginalFunds(this.prisma, this.audit, operation);
     return this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${operation.orderId}::uuid FOR UPDATE`;
       let order = await readOrder(tx, operation.orderId);

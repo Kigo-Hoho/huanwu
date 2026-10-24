@@ -13,10 +13,11 @@
     "predb:seed": "npm run db:generate",
     "db:seed": "prisma db seed",
     "dev": "tsx watch src/main.ts",
-    "lint": "eslint src test prisma prisma.config.ts vitest.config.ts vitest.phase3.config.ts",
+    "lint": "eslint src test prisma scripts prisma.config.ts vitest.config.ts vitest.phase3.config.ts vitest.phase4.config.ts",
+    "operator:approve-device": "tsx scripts/approve-operator-device.ts",
     "pretest": "npm run build --workspace @barter/contracts",
     "start": "node dist/src/main.js",
-    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.phase3.config.ts",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.phase3.config.ts && vitest run --config vitest.phase4.config.ts",
     "pretypecheck": "npm run build --workspace @barter/contracts",
     "typecheck": "prisma generate && tsc --noEmit"
   },
@@ -32,6 +33,7 @@
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "sharp": "0.35.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {

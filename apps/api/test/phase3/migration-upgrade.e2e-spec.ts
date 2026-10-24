@@ -38,7 +38,7 @@ it('upgrades the original two migrations without changing six leases or immutabl
     const leases = async () => (await client.query('SELECT "itemId","proposalId","proposalVersionId","expiresAt","createdAt" FROM "ItemReservation" ORDER BY "itemId"')).rows;
     const before = await snapshot(); const originalLeases = await leases();
     expect((await client.query('SELECT migration_name FROM "_prisma_migrations" ORDER BY migration_name')).rows).toHaveLength(2);
-    await applyMigrations(database.url);
+    await applyMigrations(database.url, 3);
     expect((await client.query('SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY migration_name')).rows).toEqual([
       { migration_name: '20260922164446_init' }, { migration_name: '20260929083118_proposals' }, { migration_name: '20261002153929_orders' },
     ]);

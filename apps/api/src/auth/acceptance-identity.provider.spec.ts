@@ -8,6 +8,7 @@ describe('acceptance two-customer identity', () => {
     await expect(provider.exchangeCode('e2e-customer-code')).resolves.toEqual({ openid: 'local-seed-customer' });
     await expect(provider.exchangeCode('e2e-customer-two-code')).resolves.toEqual({ openid: 'local-seed-customer-two' });
     await expect(provider.exchangeCode('e2e-customer-two-code')).resolves.toEqual({ openid: 'local-seed-customer-two' });
+    await expect(provider.exchangeCode('e2e-customer-three-code')).resolves.toEqual({ openid: 'local-seed-customer-three' });
     await expect(provider.exchangeCode('arbitrary-code')).rejects.toThrow();
   });
   it('cannot exchange identities outside the explicitly selected test environment', async () => {

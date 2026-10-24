@@ -9,9 +9,10 @@ import { ItemsService } from './items.service.js';
 import { PublicItemsController } from './public-items.controller.js';
 import { PublicItemsService } from './public-items.service.js';
 import { ClockModule } from '../common/clock.module.js';
+import { TradingRestrictionsModule } from '../risk/trading-restrictions.module.js';
 
 @Module({
-  imports: [AuthModule, AuditModule, ClockModule],
+  imports: [AuthModule, AuditModule, ClockModule, TradingRestrictionsModule],
   controllers: [ItemsController, AdminItemsController, PublicItemsController],
   providers: [ItemsService, ItemReviewService, PublicItemsService],
   exports: [ItemsService],

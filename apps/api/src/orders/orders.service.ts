@@ -35,6 +35,7 @@ export class OrdersService {
     const requestHash = orderRequestHash(id, input);
     try {
       return await this.prisma.$transaction(async tx => {
+        await this.handoff.lockParticipants(tx, actor.id, id);
         await tx.$queryRaw`SELECT "id" FROM "Proposal" WHERE "id" = ${id}::uuid FOR UPDATE`;
         const proposal = await tx.proposal.findUnique({ where: { id }, include: proposalInclude });
         assertProposalParticipant(proposal, actor.id);

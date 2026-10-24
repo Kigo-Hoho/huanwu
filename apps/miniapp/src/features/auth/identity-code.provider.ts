@@ -25,7 +25,7 @@ export class AcceptanceH5IdentityCodeProvider implements IdentityCodeProvider {
     const code = typeof __BARTER_ACCEPTANCE_IDENTITY_CODE__ === 'undefined'
       ? __ACCEPTANCE_IDENTITY_CODE__
       : __BARTER_ACCEPTANCE_IDENTITY_CODE__;
-    if (code !== 'e2e-customer-code' && code !== 'e2e-customer-two-code') {
+    if (code !== 'e2e-customer-code' && code !== 'e2e-customer-two-code' && code !== 'e2e-customer-three-code') {
       throw new Error('Invalid acceptance identity code.');
     }
     return code;

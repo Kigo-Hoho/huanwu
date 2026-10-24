@@ -130,7 +130,7 @@ it('preserves trusted event bodies separately from mutable receipts and financia
   await expect(client.query(`INSERT INTO "PaymentIntent" SELECT (jsonb_populate_record(NULL::"PaymentIntent",to_jsonb(p)||jsonb_build_object('id',gen_random_uuid(),'businessNo','another-deposit'))).* FROM "PaymentIntent" p`)).rejects.toThrow(/PaymentIntent_orderId_side_purpose_key/);
   await expect(client.query(`INSERT INTO "FinancialEntry" SELECT (jsonb_populate_record(NULL::"FinancialEntry",to_jsonb(f)||jsonb_build_object('id',gen_random_uuid(),'businessNo','paid-2','externalTransactionId','external-2'))).* FROM "FinancialEntry" f`)).rejects.toThrow(/FinancialEntry_intentId_entryType_key/);
   await expect(client.query(`INSERT INTO "IntegrationEvent" SELECT (jsonb_populate_record(NULL::"IntegrationEvent",to_jsonb(e)||jsonb_build_object('id',gen_random_uuid()))).* FROM "IntegrationEvent" e`)).rejects.toThrow(/IntegrationEvent_provider_eventId_key/);
-  await expect(client.query(`INSERT INTO "Shipment" SELECT (jsonb_populate_record(NULL::"Shipment",to_jsonb(s)||jsonb_build_object('id',gen_random_uuid(),'side','RECIPIENT','businessNo','ship-2'))).* FROM "Shipment" s`)).rejects.toThrow(/Shipment_carrier_trackingNumber_key/);
+  await expect(client.query(`INSERT INTO "Shipment" SELECT (jsonb_populate_record(NULL::"Shipment",to_jsonb(s)||jsonb_build_object('id',gen_random_uuid(),'side','RECIPIENT','businessNo','ship-2'))).* FROM "Shipment" s`)).rejects.toThrow(/ShipmentTrackingIdentity_pkey/);
 });
 
 it('rejects audit rewrites and deletion while keeping append available', async () => {
@@ -151,7 +151,8 @@ it('hands the exact full lease set to an order in place and never frees it throu
   let now = new Date('2026-10-02T00:00:00Z');
   const clock = { now: () => now };
   const reservations = new ReservationsService(clock);
-  const proposals = new ProposalsService(prisma, new AuditService(), clock, reservations);
+  const { TradingRestrictionsService } = await import('../../src/risk/trading-restrictions.service.js');
+  const proposals = new ProposalsService(prisma, new AuditService(), clock, reservations, new TradingRestrictionsService());
   const publicItems = new PublicItemsService(prisma, clock);
   const offer = { offeredItemIds: [item], targetItemId: second, differenceFen: 0, payer: 'NONE' as const, deliveryMode: 'IN_PERSON' as const, initiatorShippingFen: 0, recipientShippingFen: 0 };
   try {

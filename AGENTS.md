@@ -6,6 +6,7 @@ Before changing product behavior or architecture, read both approved sources of 
 - `docs/superpowers/plans/2026-09-22-foundation-listing-review-implementation.md`
 - For Phase 2 work, also read `docs/superpowers/specs/2026-09-29-barter-proposals-design.md` and `docs/superpowers/plans/2026-09-29-barter-proposals-implementation.md`.
 - For Phase 3 work, also read `docs/superpowers/specs/2026-10-02-barter-orders-fulfillment-design.md` and `docs/superpowers/plans/2026-10-02-barter-orders-fulfillment-implementation.md`.
+- For Phase 4 work, also read `docs/superpowers/specs/2026-10-09-barter-after-sales-risk-design.md` and `docs/superpowers/plans/2026-10-09-barter-after-sales-risk-implementation.md`.
 
 Apply these rules to every change in this repository:
 
@@ -24,3 +25,5 @@ Apply these rules to every change in this repository:
 - Keep Prisma 7 and the existing Vitest runners. Consult official version-7 migration documentation; do not edit applied migrations, accept resets, or substitute SQLite for PostgreSQL.
 - Browser acceptance runs through root `npm run e2e`, which creates/migrates/seeds only its owned namespace database and awaits server teardown, non-FORCE DROP and catalog/source proofs. Never run preparation migrations against a retained business database. CI uses an ephemeral PostgreSQL role able to create and drop its own test databases; runtime API keys remain outside frontend environments.
 - Before claiming Phase 3 completion run lint, typecheck, test, build, verify and e2e as six separate commands. Record warnings and external CI limitations honestly; independent task and whole-branch reviews must actually occur before marking them complete.
+
+- Phase 4 after-sales cases never auto-close, auto-consent, or invent refunds/settlements. Dual SUPER_ADMIN desktop reauth is required for funds approve/execute; OPERATIONS drafts only. Device desktop capability is approved session capability, not MFA. Risk unfreeze and funds recovery require `DESKTOP_PRIVILEGED`. Private evidence stays off public CDN; third parties get no content. E2E seeds second SUPER_ADMIN and operators only in the owned temp database and never writes devices into the retained source database.

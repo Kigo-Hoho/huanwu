@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { ItemsService } from './items.service.js';
+import { TradingRestrictionsService } from '../risk/trading-restrictions.service.js';
+const restrictions = { lockAndAssert: async () => {}, lock: async () => {}, assertAllowed: async () => {}, assertItemClear: async () => {} } as unknown as TradingRestrictionsService;
 
 describe('ItemsService', () => {
   it('maps database dates to UTC ISO strings after creating a draft', async () => {
     const createdAt = new Date('2026-09-22T02:03:04.567Z');
     const prisma = {
+      $transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> => run(prisma),
       item: {
         create: vi.fn().mockResolvedValue({
           id: 'f6165af4-602a-47fd-9ac4-dcb86aa4b5e5',
@@ -28,7 +31,7 @@ describe('ItemsService', () => {
         }),
       },
     };
-    const service = new ItemsService(prisma as never, {} as never);
+    const service = new ItemsService(prisma as never, {} as never, restrictions);
 
     const result = await service.create('b7aeb96b-21f0-4148-8604-7acac785e948', {
       title: '九成新通勤双肩包',
@@ -73,7 +76,7 @@ describe('ItemsService', () => {
         }),
       },
     };
-    const service = new ItemsService(prisma as never, {} as never);
+    const service = new ItemsService(prisma as never, {} as never, restrictions);
 
     const result = await service.getOwned(
       'b7aeb96b-21f0-4148-8604-7acac785e948',
@@ -115,6 +118,7 @@ describe('ItemsService', () => {
     });
     let readCount = 0;
     const tx = {
+      $queryRaw: async () => [],
       item: {
         findFirst: vi.fn(async () => {
           readCount += 1;
@@ -174,7 +178,7 @@ describe('ItemsService', () => {
       $transaction: vi.fn(async (callback) => callback(tx)),
     };
     const auditService = { record: vi.fn(async () => undefined) };
-    const service = new ItemsService(prisma as never, auditService as never);
+    const service = new ItemsService(prisma as never, auditService as never, restrictions);
     const lateEdit = service.update(state.ownerId, state.id, {
       title: '不应覆盖提交结果的新标题',
       imageUrls: [

@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { OrderAddressViewSchema, type OrderAddressView, type OrderSide } from '@barter/contracts';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 
-export interface AddressContext { orderId: string; side: OrderSide; version: number }
+export interface AddressContext { orderId: string; side: OrderSide; version: number; namespace?: 'return-address-v1' }
 export interface EncryptedAddress { keyVersion: string; nonce: Uint8Array<ArrayBuffer>; tag: Uint8Array<ArrayBuffer>; ciphertext: Uint8Array<ArrayBuffer> }
 
 const contextSchema = OrderAddressViewSchema.pick({ orderId: true, side: true, version: true });
@@ -20,7 +20,7 @@ function configuration() {
   return { key, keyVersion };
 }
 function aad(context: AddressContext, keyVersion: string): Buffer {
-  return Buffer.from(JSON.stringify(['order-address-v1', context.orderId, context.side, context.version, keyVersion]));
+  return Buffer.from(JSON.stringify([context.namespace ?? 'order-address-v1', context.orderId, context.side, context.version, keyVersion]));
 }
 function sameContext(address: OrderAddressView, context: AddressContext): boolean {
   return address.orderId === context.orderId && address.side === context.side && address.version === context.version;
@@ -31,14 +31,14 @@ export class AddressCipher {
   encrypt(address: OrderAddressView, context: AddressContext): EncryptedAddress {
     try {
       const { key, keyVersion } = configuration();
-      const parsedContext = contextSchema.parse(context);
+      const parsedContext = contextSchema.parse({ orderId: context.orderId, side: context.side, version: context.version });
       const parsed = OrderAddressViewSchema.parse(address);
       if (!sameContext(parsed, parsedContext)) throw unavailable();
       const serialized = Buffer.from(JSON.stringify(parsed), 'utf8');
       if (serialized.length > maxSerializedAddressBytes) throw unavailable();
       const nonce = randomBytes(12);
       const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: 16 });
-      cipher.setAAD(aad(parsedContext, keyVersion));
+      cipher.setAAD(aad({ ...parsedContext, namespace: context.namespace }, keyVersion));
       const ciphertext = Buffer.concat([cipher.update(serialized), cipher.final()]);
       return { keyVersion, nonce, tag: cipher.getAuthTag(), ciphertext };
     } catch { throw unavailable(); }
@@ -46,10 +46,10 @@ export class AddressCipher {
   decrypt(value: EncryptedAddress, context: AddressContext): OrderAddressView {
     try {
       const { key, keyVersion } = configuration();
-      const parsedContext = contextSchema.parse(context);
+      const parsedContext = contextSchema.parse({ orderId: context.orderId, side: context.side, version: context.version });
       if (value.keyVersion !== keyVersion || !(value.nonce instanceof Uint8Array) || value.nonce.length !== 12 || !(value.tag instanceof Uint8Array) || value.tag.length !== 16 || !(value.ciphertext instanceof Uint8Array) || value.ciphertext.length === 0 || value.ciphertext.length > maxSerializedAddressBytes) throw unavailable();
       const decipher = createDecipheriv('aes-256-gcm', key, value.nonce, { authTagLength: 16 });
-      decipher.setAAD(aad(parsedContext, keyVersion));
+      decipher.setAAD(aad({ ...parsedContext, namespace: context.namespace }, keyVersion));
       decipher.setAuthTag(value.tag);
       // No plaintext is parsed or returned until final() authenticates the entire message.
       const plaintext = Buffer.concat([decipher.update(value.ciphertext), decipher.final()]);

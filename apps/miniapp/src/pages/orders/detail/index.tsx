@@ -2,15 +2,17 @@ import { OrderCancellationSchema, OrderIssueSchema, type OrderAddressView, type 
 import { Button, Image, Input, Text, View } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useEffect, useRef, useState } from 'react';
+import type { AfterSalesApi } from '../../../features/after-sales/after-sales-api';
 import type { OrderAction, OrderApi, PendingOrderCommand } from '../../../features/orders/order-api';
 import { ApiClientError } from '../../../lib/api-client';
-import { defaultIdentityProvider, defaultOrderApi } from '../../../lib/default-services';
+import { defaultAfterSalesApi, defaultIdentityProvider, defaultOrderApi } from '../../../lib/default-services';
 import { AddressForm } from '../address-form';
 import { PaymentActions } from '../payment-actions';
 import { FulfillmentActions } from '../fulfillment-actions';
 import { activeOrder, alertRole, buttonRole, buttonDisabled, fundsReady, inputLabel, money, orderStatusLabels, pureCustomer, sideLabel, type CustomerIdentity } from '../shared';
+import { TradingFreezeBanner } from '../../after-sales/trading-freeze-banner';
 
-export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurrentInstance().router?.params.id ?? '' }: { api?: OrderApi; orderId?: string }) {
+export function OrderDetailPage({ api = defaultOrderApi, afterSalesApi = defaultAfterSalesApi, orderId = Taro.getCurrentInstance().router?.params.id ?? '', navigate = (url: string) => { void Taro.navigateTo({ url }); } }: { api?: OrderApi; afterSalesApi?: AfterSalesApi; orderId?: string; navigate?: (url: string) => void }) {
   const [order, setOrder] = useState<OrderView | null>(null); const current = useRef<OrderView | null>(null);
   const [me, setMe] = useState<CustomerIdentity | null>(null); const [busy, setBusy] = useState(false);
   const identity = useRef<string | null>(null);
@@ -99,12 +101,15 @@ export function OrderDetailPage({ api = defaultOrderApi, orderId = Taro.getCurre
   return <View style={{ padding: '16px', overflowWrap: 'anywhere' }}>
     <Text>交换订单</Text>
     <Button {...buttonRole} disabled={busy} onClick={() => { if (!locked.current) void refresh(); }}>刷新订单</Button>
+    <TradingFreezeBanner api={afterSalesApi} />
     {error && <Text {...alertRole}>{error}</Text>}
     {unknown && customer && <Button {...buttonRole} disabled={busy} onClick={() => { if (pending.current) void run(pending.current.action, undefined, pending.current.resourceId, true); }}>重试原操作</Button>}
     {!order ? <Text>加载订单中</Text> : <View>
       <Text>{orderStatusLabels[order.status]}</Text><Text>订单版本：{order.version}</Text><Text>订单号：{order.id}</Text>
       {order.simulation && <Text>测试支付／测试物流，不产生真实资金或寄递</Text>}
       {order.holdReason && <Text>待处理原因：{order.holdReason}；物品仍被占用</Text>}
+      {customer && <Button {...buttonRole} disabled={busy} onClick={() => navigate(`/pages/after-sales/create/index?orderId=${order.id}&orderVersion=${order.version}`)}>申请售后</Button>}
+      {customer && <Button {...buttonRole} disabled={busy} onClick={() => navigate('/pages/after-sales/list/index')}>我的售后</Button>}
       {order.status === 'CANCEL_PENDING' && <Text>资金核对中，核对退款与未决付款完成前物品仍被占用</Text>}
       {order.status === 'SETTLING' && <Text>差价结算与保证金返还由后台核对，尚未完成</Text>}
       <Text>规则：{order.rules.version} · 每人保证金 {money(order.rules.depositFen)} · 平台服务费 {money(order.rules.feeFen)}</Text>

@@ -6,6 +6,8 @@ export default defineConfig({
     globalSetup: ['test/phase3/support/database-global-setup.ts'],
     pool: 'forks',
     isolate: true,
+    // Bound owned database creation/cleanup and Prisma connection contention.
+    maxWorkers: 2,
     maxConcurrency: 1,
     testTimeout: 30000,
     hookTimeout: 60000,

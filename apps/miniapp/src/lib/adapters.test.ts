@@ -139,7 +139,7 @@ describe('customer adapters', () => {
   it('selects either explicitly injected acceptance customer and rejects unknown codes', async () => {
     const provider = createIdentityCodeProvider({ provider: 'acceptance', target: 'h5', buildEnvironment: 'acceptance' });
     try {
-      for (const code of ['e2e-customer-code', 'e2e-customer-two-code']) {
+      for (const code of ['e2e-customer-code', 'e2e-customer-two-code', 'e2e-customer-three-code']) {
         vi.stubGlobal('__BARTER_ACCEPTANCE_IDENTITY_CODE__', code);
         await expect(provider.getCode()).resolves.toBe(code);
       }

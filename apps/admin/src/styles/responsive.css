@@ -286,3 +286,48 @@ body {
     padding: 16px;
   }
 }
+
+
+.after-sales-page,
+.risk-page,
+.security-page {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.after-sales-page > .ant-card,
+.risk-page > .ant-card,
+.security-page > .ant-card {
+  margin-block: 16px;
+}
+
+.after-sales-page .ant-table,
+.risk-page .ant-table,
+.security-page .ant-table {
+  table-layout: fixed;
+}
+
+.resolution-form,
+.approval-actions,
+.reauth-actions {
+  display: grid;
+  gap: 12px;
+  margin-block: 16px;
+}
+
+.funds-actions,
+.reauth-actions,
+[aria-label="移动紧急止损"],
+[aria-label="桌面恢复入口"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 767px) {
+  .after-sales-page .ant-table-wrapper,
+  .risk-page .ant-table-wrapper,
+  .security-page .ant-table-wrapper {
+    display: none;
+  }
+}

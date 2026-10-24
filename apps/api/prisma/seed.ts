@@ -32,6 +32,12 @@ const seededUsers = [
     role: Role.OPERATIONS,
     email: 'operations@barter.local',
   },
+  {
+    id: '00000000-0000-4000-8000-000000000004',
+    displayName: 'Local Super Admin Two',
+    role: Role.SUPER_ADMIN,
+    email: 'super-admin-two@barter.local',
+  },
 ] as const;
 
 async function seedAdminUsers(password: string): Promise<void> {

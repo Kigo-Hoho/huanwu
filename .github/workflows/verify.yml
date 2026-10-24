@@ -49,6 +49,7 @@ jobs:
       # The owner generates API-only address/signing keys once per run, builds
       # explicit acceptance H5, and migrates/seeds only a new owned database.
       - run: npm run e2e
+      # Upload Playwright traces only. Do not upload runtime secrets, .env, or private evidence originals.
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

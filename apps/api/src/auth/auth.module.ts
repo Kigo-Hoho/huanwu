@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 
 import { DatabaseModule } from '../database/database.module.js';
+import { AuditModule } from '../audit/audit.module.js';
+import { ClockModule } from '../common/clock.module.js';
+import { OperatorSessionService } from '../operator-security/operator-session.service.js';
 import { AcceptanceIdentityProvider } from './acceptance-identity.provider.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
@@ -14,10 +17,11 @@ import {
 } from './wechat-identity.provider.js';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, AuditModule, ClockModule],
   controllers: [AuthController],
   providers: [
     AuthService,
+    OperatorSessionService,
     JwtAuthGuard,
     RolesGuard,
     CustomerOnlyGuard,
@@ -44,6 +48,6 @@ import {
       },
     },
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard, CustomerOnlyGuard],
+  exports: [AuthService, JwtAuthGuard, RolesGuard, CustomerOnlyGuard, OperatorSessionService],
 })
 export class AuthModule {}

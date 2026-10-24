@@ -13,6 +13,10 @@ test('acceptance runtime keeps generated API secrets out of frontend environment
   assert.equal(runtime.frontend.E2E_REVIEWER_PASSWORD, undefined);
   assert.equal(runtime.browser.E2E_REVIEWER_PASSWORD, 'test');
   assert.equal(runtime.api.DATABASE_URL, owned);
+  assert.equal(runtime.api.LOCAL_PRIVATE_EVIDENCE_DIR, 'owned-images-private-evidence');
+  assert.match(runtime.api.OPERATOR_ORIGINS, /127\.0\.0\.1:5173/);
+  assert.equal(runtime.frontend.LOCAL_PRIVATE_EVIDENCE_DIR, undefined);
+  assert.equal(runtime.frontend.OPERATOR_ORIGINS, undefined);
   assert.equal(Buffer.from(runtime.api.ADDRESS_ENCRYPTION_KEY_BASE64, 'base64').length, 32);
   assert.notEqual(runtime.api.ADDRESS_ENCRYPTION_KEY_BASE64, runtime.api.SIMULATED_INTEGRATION_SIGNING_KEY_BASE64);
 });

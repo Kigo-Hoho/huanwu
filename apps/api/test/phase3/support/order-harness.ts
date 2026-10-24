@@ -12,7 +12,10 @@ import { PrismaService } from '../../../src/database/prisma.service.js';
 import { configureApp } from '../../../src/main.js';
 import { ProposalExpiryScheduler } from '../../../src/proposals/proposal-expiry.scheduler.js';
 import { OrderExpiryScheduler } from '../../../src/orders/order-expiry.scheduler.js';
+import { CaseExpiryScheduler } from '../../../src/after-sales/case-expiry.scheduler.js';
 import { OutboxWorker } from '../../../src/integrations/outbox.worker.js';
+import { ReturnEventReconciler } from '../../../src/returns/return-event-reconciler.js';
+import { FinancialEventReconciler } from '../../../src/compensation/financial-event-reconciler.js';
 import { createPhase3Database } from './database-fixtures.js';
 
 export class MutableClock implements Clock {
@@ -46,7 +49,10 @@ export async function createOrderHarness() {
     .overrideProvider(PrismaService).useValue(prisma)
     .overrideProvider(CLOCK).useValue(clock)
     .overrideProvider(OutboxWorker).useValue({})
+    .overrideProvider(ReturnEventReconciler).useValue({})
+    .overrideProvider(FinancialEventReconciler).useValue({})
     .overrideProvider(OrderExpiryScheduler).useValue({})
+    .overrideProvider(CaseExpiryScheduler).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
   app = module.createNestApplication();
   configureApp(app); await app.init();
@@ -80,7 +86,7 @@ export async function createOrderHarness() {
     return ProposalViewSchema.parse((await command(actors.recipient, `/api/proposals/${proposal.id}/accept`, { expectedVersion: proposal.version }).expect(200)).body);
   }
   return {
-    app, prisma, clock, actors, command, get, confirmedProposal,
+    app, prisma, clock, actors, token, command, get, confirmedProposal,
     convert: (proposal: { id: string; version: number }, actor = actors.initiator, key?: string) => command(actor, `/api/proposals/${proposal.id}/order`, { expectedVersion: proposal.version } satisfies OrderCommandInput, key),
     faultAuditOnce(afterInsert = false) {
       const audit = app.get(AuditService); const original = audit.record.bind(audit);

@@ -12,10 +12,12 @@ import { ReservationsService } from '../reservations/reservations.service.js';
 import { OrderHoldService } from '../orders/order-hold.service.js';
 import { SettlementService } from './settlement.service.js';
 import { OrderExpiryService } from '../orders/order-expiry.service.js';
+import { OrderFactsService } from '../orders/order-facts.service.js';
 
 @Injectable()
 export class PaymentEventsService {
   constructor(
+    @Inject(OrderFactsService) private readonly facts: OrderFactsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
@@ -27,7 +29,7 @@ export class PaymentEventsService {
     @Inject(OrderExpiryService) private readonly expiry: OrderExpiryService,
   ) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
-    if (event.kind === 'SHIPMENT_PROGRESS') throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a financial event' });
+    if ('shipmentId' in event) throw new BadRequestException({ code: 'INTEGRATION_EVENT_INVALID', message: 'Expected a financial event' });
     const effect = event.kind === 'PAYMENT_SUCCEEDED' ? null : await this.prisma.outboxCommand.findUnique({ where: { businessNo: event.businessNo } });
     const originalNo = effect ? (effect.payload as Prisma.JsonObject).paymentBusinessNo : event.businessNo;
     const association = typeof originalNo === 'string' ? await this.prisma.paymentIntent.findUnique({ where: { businessNo: originalNo } }) : null;
@@ -103,6 +105,7 @@ export class PaymentEventsService {
       if (entryType === 'REFUND' && order.status === 'SETTLING' && intent.purpose !== 'DEPOSIT') { await reject('REFUND_CONTRADICTS_SETTLEMENT', true); return; }
       await tx.financialEntry.create({ data: { intentId: intent.id, integrationEventId: recorded.id, entryType, provider: event.provider, externalTransactionId: event.externalTransactionId, businessNo: event.businessNo, amountFen: intent.amountFen, currency: 'CNY', occurredAt: new Date(event.occurredAt) } });
       if (entryType !== 'PAYMENT') {
+        await tx.resolutionExecutionProgress.updateMany({ where: { execution: { executionStep: `CLAIM:${event.businessNo}`, originalPaymentIntentId: intent.id } }, data: { status: 'SUCCEEDED', completedAt: new Date(event.occurredAt) } });
         if (entryType === 'REFUND') await tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'REFUNDED', refundedAt: new Date(event.occurredAt) } });
         await receipt('PROCESSED', order.status === 'ON_HOLD' ? 'ORDER_ON_HOLD' : null);
         const finalized = order.status === 'SETTLING' ? await this.settlement.tryFinalize(tx, order.id, now) : await this.cancellation.tryFinalize(tx, order.id, now);
@@ -141,5 +144,6 @@ export class PaymentEventsService {
       const waiting = await this.prisma.integrationEvent.findMany({ where: { businessNo: { in: [`refund:${association.id}`, `settle:${association.id}`] }, receipt: { status: 'PENDING', reason: 'PAYMENT_NOT_RECORDED' } } });
       for (const pending of waiting) await this.applyVerified(pending.payload as unknown as VerifiedIntegrationEvent);
     }
+    if (association) await this.facts.notify(association.orderId);
   }
 }

@@ -24,7 +24,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['test/**/*.e2e-spec.ts'],
-          exclude: ['test/phase3/**'],
+          exclude: ['test/phase3/**', 'test/phase4/**'],
           globalSetup: ['test/phase3/support/legacy-database-global-setup.ts'],
           setupFiles: ['test/phase3/support/legacy-database-setup.ts'],
         },
@@ -32,6 +32,9 @@ export default defineConfig({
     ],
     pool: 'forks',
     isolate: true,
+    // Bound this legacy multi-project runner's simultaneous PostgreSQL clones
+    // and Prisma connections; unlimited forks exhaust transaction-start budgets.
+    maxWorkers: 2,
     maxConcurrency: 1,
     hookTimeout: 60000,
     sequence: { hooks: 'stack' },
