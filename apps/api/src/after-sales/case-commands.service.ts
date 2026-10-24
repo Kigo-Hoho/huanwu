@@ -11,6 +11,7 @@ import { mapAdminCase, mapCase } from './case.mapper.js';
 import { assertCaseOperator, assertCaseParticipant, assertCurrentCustomer, assertOpenCase } from './case-policy.js';
 import { readCase } from './case-reader.js';
 import type { CaseCommandContext, CaseMutationContext, CaseTx } from './case.types.js';
+import { CaseExpiryService } from './case-expiry.service.js';
 
 export interface OperatorCaseCommandContext extends CaseCommandContext { operatorSession: OperatorSessionContext; requiredAction?: OperatorAction }
 export function assertCaseKey(key: string): void {
@@ -40,6 +41,7 @@ export class CaseCommandsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(OperatorSessionService) private readonly sessions: OperatorSessionService,
+    @Inject(CaseExpiryService) private readonly expiry: CaseExpiryService,
   ) {}
   async run(context: CaseCommandContext | OperatorCaseCommandContext, mutate: (ctx: CaseMutationContext) => Promise<void>, lockAuthorities?: (tx: CaseTx) => Promise<void>): Promise<CaseCommandResult> {
     assertCaseKey(context.key);
@@ -48,7 +50,8 @@ export class CaseCommandsService {
     // Immutable association locates the order before acquiring any business lock.
     const located = await this.prisma.afterSalesCase.findUnique({ where: { id: context.caseId }, select: { orderId: true } });
     if (!located) throw new NotFoundException({ code: 'AFTER_SALES_NOT_FOUND', message: 'After-sales case was not found' });
-    return caseTransaction(this.prisma, async tx => {
+    try {
+    return await caseTransaction(this.prisma, async tx => {
       // Multi-person authority fences must precede even the executing actor's
       // session locks, and all order/case locks. Never upgrade actor locks later.
       await lockAuthorities?.(tx);
@@ -69,9 +72,13 @@ export class CaseCommandsService {
       if (value.version !== context.input.expectedCaseVersion) throw new ConflictException({ code: 'CASE_VERSION_CONFLICT', message: 'Case has changed' });
       if (order.version !== context.input.expectedOrderVersion) throw new ConflictException({ code: 'ORDER_VERSION_CONFLICT', message: 'Order has changed' });
       assertOpenCase(value);
+      const now = this.clock.now();
+      await this.expiry.reconcileInTransaction({ tx, order, case: value, now, actor: context.actor });
+      const current = await readCase(tx, context.caseId);
+      if (!current) throw new NotFoundException({ code: 'AFTER_SALES_NOT_FOUND', message: 'After-sales case was not found' });
       const operator = 'operatorSession' in context;
       const before = operator ? mapAdminCase(value) : mapCase(value);
-      await mutate({ tx, order, case: value, now: this.clock.now(), actor: context.actor });
+      await mutate({ tx, order, case: current, now, actor: context.actor });
       await tx.afterSalesCase.update({ where: { id: value.id }, data: { version: { increment: 1 } } });
       await tx.order.update({ where: { id: order.id }, data: { version: { increment: 1 } } });
       const updated = await tx.afterSalesCase.findUniqueOrThrow({ where: { id: value.id } });
@@ -85,5 +92,17 @@ export class CaseCommandsService {
       await tx.idempotencyRecord.create({ data: { ...identity, requestHash, response: result as unknown as Prisma.InputJsonValue } });
       return result;
     });
+    } catch (error) {
+      // Rejected command TX (including provisional idempotency) has rolled back.
+      // Persist overdue transitions independently so deadlines are not lost, then
+      // rethrow the original conflict — same pattern as OrderCommandsService.
+      if (error instanceof ConflictException) {
+        const code = (error.getResponse() as { code?: string }).code;
+        if (code === 'AFTER_SALES_NOT_ELIGIBLE' || code === 'FUNDS_UNRESOLVED' || code === 'RETURN_NOT_READY') {
+          await this.expiry.reconcile(context.caseId);
+        }
+      }
+      throw error;
+    }
   }
 }

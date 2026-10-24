@@ -14,11 +14,12 @@ import { OutboxService } from '../integrations/outbox.service.js';
 import { SimulatedProviderStore } from '../integrations/simulated-provider.store.js';
 import { CLOCK, type Clock } from '../common/clock.js';
 import { ReturnPlanService } from '../returns/return-plan.service.js';
+import { CaseExpiryService } from '../after-sales/case-expiry.service.js';
 
 export const fundsUnresolved = () => new ConflictException({ code: 'FUNDS_UNRESOLVED', message: 'Current compensation obligation is not ready' });
 @Injectable()
 export class CompensationService implements OnModuleInit {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(CaseCommandsService) private readonly commands: CaseCommandsService, @Inject(RESOLUTION_EXECUTORS) private readonly registry: ResolutionExecutors, @Inject(OutboxService) private readonly outbox: OutboxService, @Inject(SimulatedProviderStore) private readonly store: SimulatedProviderStore, @Inject(CLOCK) private readonly clock: Clock, @Inject(ReturnPlanService) private readonly returns: ReturnPlanService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(CaseCommandsService) private readonly commands: CaseCommandsService, @Inject(RESOLUTION_EXECUTORS) private readonly registry: ResolutionExecutors, @Inject(OutboxService) private readonly outbox: OutboxService, @Inject(SimulatedProviderStore) private readonly store: SimulatedProviderStore, @Inject(CLOCK) private readonly clock: Clock, @Inject(ReturnPlanService) private readonly returns: ReturnPlanService, @Inject(CaseExpiryService) private readonly expiry: CaseExpiryService) {}
   onModuleInit() {
     // This planner records funds only. START remains pending for Task10's order
     // finalization; no order is resumed/completed merely by accepting this plan.
@@ -77,7 +78,12 @@ export class CompensationService implements OnModuleInit {
       if (value.status !== 'EXECUTING' || value.currentResolutionVersion !== payment.obligation.resolution.number || !['CREATED', 'PENDING'].includes(payment.status) || payment.obligation.paymentDeadline <= this.clock.now()) throw fundsUnresolved();
       return payment;
     });
-    const payment = await authorize();
+    let payment;
+    try { payment = await authorize(); }
+    catch (error) {
+      if (error instanceof ConflictException && (error.getResponse() as { code?: string }).code === 'FUNDS_UNRESOLVED') await this.expiry.reconcile(caseId);
+      throw error;
+    }
     const result = await this.store.query(payment.businessNo, ['CREATE_COMPENSATION']);
     await authorize();
     return result.status === 'PENDING' ? { paymentId, status: 'READY', provider: 'simulated', params: { simulation: 'true', businessNo: payment.businessNo } } : { paymentId, status: 'PENDING' };

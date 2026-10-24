@@ -4,10 +4,11 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { CaseCommandsService, type OperatorCaseCommandContext } from './case-commands.service.js';
 import { assertSafeCaseClosure } from './case-policy.js';
 import type { CaseCommandContext, CaseMutationContext } from './case.types.js';
+import { CaseExpiryService } from './case-expiry.service.js';
 
 @Injectable()
 export class CaseRecordsService {
-  constructor(@Inject(CaseCommandsService) private readonly commands: CaseCommandsService) {}
+  constructor(@Inject(CaseCommandsService) private readonly commands: CaseCommandsService, @Inject(CaseExpiryService) private readonly expiry: CaseExpiryService) {}
   respond(context: CaseCommandContext, input: CaseResponseInput) {
     return this.commands.run({ ...context, input }, async ctx => {
       if (ctx.case.status === 'EXECUTING') throw new ConflictException({ code: 'AFTER_SALES_NOT_ELIGIBLE', message: 'Execution requires its dedicated workflow' });
@@ -21,8 +22,12 @@ export class CaseRecordsService {
   }
   private async advanceEvidenceResponse(ctx: CaseMutationContext): Promise<void> {
     const side = ctx.order.initiatorId === ctx.actor!.id ? 'INITIATOR' : 'RECIPIENT';
-    if (ctx.case.status === 'AWAITING_RESPONSE' && (ctx.case.responseSide === side || (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline))) {
-      if (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline) await this.record(ctx, 'RESPONSE_OVERDUE', '补证期限已届满，转人工核验', undefined, true);
+    if (ctx.case.status !== 'AWAITING_RESPONSE') return;
+    if (ctx.case.responseDeadline !== null && ctx.now >= ctx.case.responseDeadline) {
+      await this.expiry.reconcileInTransaction(ctx);
+      return;
+    }
+    if (ctx.case.responseSide === side) {
       await ctx.tx.afterSalesCase.update({ where: { id: ctx.case.id }, data: { status: 'UNDER_REVIEW', responseSide: null, responseDeadline: null } });
     }
   }

@@ -12,6 +12,7 @@ import { PrismaService } from '../../../src/database/prisma.service.js';
 import { configureApp } from '../../../src/main.js';
 import { ProposalExpiryScheduler } from '../../../src/proposals/proposal-expiry.scheduler.js';
 import { OrderExpiryScheduler } from '../../../src/orders/order-expiry.scheduler.js';
+import { CaseExpiryScheduler } from '../../../src/after-sales/case-expiry.scheduler.js';
 import { OutboxWorker } from '../../../src/integrations/outbox.worker.js';
 import { ReturnEventReconciler } from '../../../src/returns/return-event-reconciler.js';
 import { FinancialEventReconciler } from '../../../src/compensation/financial-event-reconciler.js';
@@ -51,6 +52,7 @@ export async function createOrderHarness() {
     .overrideProvider(ReturnEventReconciler).useValue({})
     .overrideProvider(FinancialEventReconciler).useValue({})
     .overrideProvider(OrderExpiryScheduler).useValue({})
+    .overrideProvider(CaseExpiryScheduler).useValue({})
     .overrideProvider(ProposalExpiryScheduler).useValue({}).compile();
   app = module.createNestApplication();
   configureApp(app); await app.init();
