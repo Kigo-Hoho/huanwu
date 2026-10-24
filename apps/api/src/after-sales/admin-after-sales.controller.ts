@@ -9,13 +9,24 @@ import { assertOperatorOrigin } from '../operator-security/operator-session.serv
 import { AdminAfterSalesService } from './admin-after-sales.service.js';
 import { ResolutionApprovalService } from './resolution-approval.service.js';
 import { ResolutionExecutionService } from './resolution-execution.service.js';
+import { OrderDeadlineExtensionSchema, type OrderDeadlineExtensionInput } from '@barter/contracts';
+import { InterventionCommandsService } from './intervention-commands.service.js';
 
 @Controller('admin/after-sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AdminResolutionController {
   constructor(@Inject(AdminAfterSalesService) private readonly cases: AdminAfterSalesService,
     @Inject(ResolutionApprovalService) private readonly approvals: ResolutionApprovalService,
-    @Inject(ResolutionExecutionService) private readonly executions: ResolutionExecutionService) {}
+    @Inject(ResolutionExecutionService) private readonly executions: ResolutionExecutionService,
+    @Inject(InterventionCommandsService) private readonly interventions: InterventionCommandsService) {}
+  @Post(':id/extend-deadline')
+  @Roles('SUPER_ADMIN')
+  @HttpCode(200)
+  extend(@Req() request: AuthenticatedRequest, @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(OrderDeadlineExtensionSchema)) input: OrderDeadlineExtensionInput, @Headers('idempotency-key') key: string) {
+    assertOperatorOrigin(request);
+    return this.interventions.extend({ ...requireOperatorSession(request), grantId: input.operatorAction.grantId }, id.toLowerCase(), input, key);
+  }
   @Post(':id/approvals')
   @Roles('SUPER_ADMIN')
   @HttpCode(200)

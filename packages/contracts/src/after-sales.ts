@@ -28,6 +28,8 @@ export const ResolutionConsentSchema = z.strictObject({ ...ResolutionCommandSche
 export const ResolutionAdjudicationSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), evidenceIds: z.array(uuid).max(60).refine(distinct), operatorAction: OperatorActionContextSchema });
 export const ResolutionApprovalSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), operatorAction: OperatorActionContextSchema });
 export const ResolutionExecutionSchema = z.strictObject({ ...ResolutionCommandSchema.shape, reason: text(1, 2000), operatorAction: OperatorActionContextSchema });
+export const OrderDeadlineExtensionSchema = z.strictObject({ ...ResolutionExecutionSchema.shape, kind: z.enum(['DETAILS', 'PAYMENT', 'FULFILLMENT', 'ACCEPTANCE']), side: OrderSideSchema.optional() }).refine(v => v.kind === 'ACCEPTANCE' || !v.side, 'Only acceptance has a participant deadline');
+export type OrderDeadlineExtensionInput = z.infer<typeof OrderDeadlineExtensionSchema>;
 export const NetCompensationSchema = z.strictObject({ amountFen: z.number().int().min(0).max(60000), payer: ProposalPayerSchema })
   .refine(v => v.amountFen === 0 ? v.payer === 'NONE' : v.payer !== 'NONE', 'Zero compensation requires NONE; positive compensation requires a payer');
 export const CompensationComponentsSchema = z.strictObject({

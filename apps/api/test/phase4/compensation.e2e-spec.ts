@@ -36,15 +36,16 @@ it('composes a return plan with its independent compensation without replacing r
   const f = await h.fixture({ type: 'RETURN_ORIGINALS' }); await f.execute();
   expect(await h.prisma.compensationObligation.count({ where: { resolution: { caseId: f.caseId } } })).toBe(1);
 });
-it('refuses an unimplemented funds-free resume rather than marking a no-op planner successful', async () => {
+it('executes the registered funds-free recovery and completes its case', async () => {
   const f = await h.fixture({ type: 'CONTINUE_EXCHANGE', amount: 0, approve: false });
   const before = await f.current();
-  // Task10 owns resume; the shared execution gate chooses RESUME_ORDER itself.
+  // The shared execution gate chooses RESUME_ORDER itself.
   const business = { ...before, reason: '等待订单恢复执行器' };
   const { operatorRequestHash } = await import('../../src/operator-security/operator-action.types.js');
   const grant = await h.grant(h.one, { action: 'RESUME_ORDER', resourceId: f.caseId, expectedVersions: before, requestHash: operatorRequestHash(business) }).expect(200);
-  await h.post(h.one, `${f.path}/execute`, { ...business, operatorAction: { sessionId: h.one.response.body.operatorSession.id, grantId: grant.body.id } }).expect(503);
-  expect(await f.current()).toEqual(before);
+  await h.post(h.one, `${f.path}/execute`, { ...business, operatorAction: { sessionId: h.one.response.body.operatorSession.id, grantId: grant.body.id } }).expect(200);
+  expect((await h.prisma.afterSalesCase.findUniqueOrThrow({ where: { id: f.caseId } })).status).toBe('RESOLVED');
+  expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('AWAITING_PAYMENT');
 });
 
 it('collects once through an explicit payer action and separately disburses the exact amount', async () => {

@@ -28,8 +28,9 @@ export async function createCompensationHarness() {
   const two = await h.operatorLogin(h.actors.superAdminTwo, second.cookie);
   const ops = await h.operatorLogin(h.actors.operations);
   const versions = (result: CaseCommandResult) => ({ expectedCaseVersion: result.case.version, expectedOrderVersion: result.orderVersion });
-  async function fixture(options: { approve?: boolean; amount?: number; type?: ResolutionInput['type']; originalDeposit?: boolean; completedOrder?: { id: string; version: number } } = {}) {
-    let order = options.completedOrder ?? await h.prepareOrder({ mode: 'IN_PERSON' });
+  async function fixture(options: { approve?: boolean; amount?: number; type?: ResolutionInput['type']; originalDeposit?: boolean; completedOrder?: { id: string; version: number }; historicalOrder?: { id: string; version: number }; existingOrder?: { id: string; version: number }; delivered?: boolean; count?: number } = {}) {
+    let order = options.completedOrder ?? options.historicalOrder ?? options.existingOrder ?? await h.prepareOrder({ mode: 'IN_PERSON', offeredCount: options.count });
+    if (options.delivered) await h.prisma.orderPartyProgress.updateMany({ where: { orderId: order.id }, data: { handedOverAt: h.clock.now(), incomingDeliveredAt: h.clock.now() } });
     if (options.originalDeposit) {
       const started = await h.command(h.actors.initiator, `/api/orders/${order.id}/payments`, { expectedVersion: order.version, purpose: 'DEPOSIT' }).expect(202);
       const original = await h.prisma.paymentIntent.findUniqueOrThrow({ where: { id: started.body.paymentIntentId } });
@@ -52,7 +53,8 @@ export async function createCompensationHarness() {
       input.originalFunds = (await h.prisma.paymentIntent.findMany({ where: { orderId: order.id } })).map(p => ({ paymentIntentId: p.id, destination: p.purpose === 'DEPOSIT' ? 'REFUND_PAYER' : 'SETTLE_BENEFICIARY' }));
       await post(ops, `${path}/resolutions`, { ...input, netCompensation: { amountFen: 60001, payer: 'RECIPIENT' } }).expect(400);
     }
-    if (options.type === 'CANCEL_BEFORE_HANDOVER' || options.type === 'RETURN_ORIGINALS') { input.returnPlan = snapshots.map(s => ({ itemSnapshotId: s.id, outcome: 'UNDELIVERED' })); input.orderOutcome = 'CANCEL'; }
+    if (options.type === 'CANCEL_BEFORE_HANDOVER' || options.type === 'RETURN_ORIGINALS') { input.returnPlan = snapshots.map(s => ({ itemSnapshotId: s.id, outcome: options.delivered ? 'RETURN_ORIGINAL' : 'UNDELIVERED' })); input.orderOutcome = 'CANCEL'; }
+    if (options.historicalOrder) input.orderOutcome = 'PRESERVE_TERMINAL';
     result = (await post(ops, `${path}/resolutions`, input).expect(200)).body;
     for (const actor of [h.actors.initiator, h.actors.recipient]) result = (await h.command(actor, `/api/after-sales/${caseId}/consent`, { ...versions(result), resolutionVersion: 1, decision: 'AGREE' }).expect(200)).body;
     async function authorized(session: Session, action: OperatorAction) {
@@ -63,7 +65,7 @@ export async function createCompensationHarness() {
     if (options.approve !== false) for (const session of [one, two]) result = (await post(session, `${path}/approvals`, await authorized(session, 'APPROVE_FUNDS')).expect(200)).body;
     return {
       order, caseId, path, input,
-      execute: async (status = 200) => { const response = await post(one, `${path}/execute`, await authorized(one, 'EXECUTE_FUNDS')).expect(status); if (status === 200) result = response.body; return response; },
+      execute: async (status = 200) => { const response = await post(one, `${path}/execute`, await authorized(one, options.type === 'CONTINUE_EXCHANGE' && !amount ? 'RESUME_ORDER' : 'EXECUTE_FUNDS')).expect(status); if (status === 200) result = response.body; return response; },
       async current() { const c = await h.prisma.afterSalesCase.findUniqueOrThrow({ where: { id: caseId } }); const o = await h.prisma.order.findUniqueOrThrow({ where: { id: order.id } }); return { expectedCaseVersion: c.version, expectedOrderVersion: o.version, resolutionVersion: 1 }; },
     };
   }

@@ -2,6 +2,7 @@ import {
   CaseEvidenceRequestSchema, CaseListQuerySchema, CaseRejectSchema, CaseResponseSchema,
   CaseWithdrawalResponseSchema, CaseWithdrawalSchema, CreateCaseSchema,
   ResolutionConsentSchema, type ResolutionConsentInput,
+  ResolutionCommandSchema, type ResolutionCommandInput,
   type CaseEvidenceRequestInput, type CaseListQuery, type CaseRejectInput,
   type CaseResponseInput, type CaseWithdrawalInput, type CaseWithdrawalResponseInput, type CreateCaseInput,
 } from '@barter/contracts';
@@ -18,6 +19,7 @@ import { assertOperatorOrigin } from '../operator-security/operator-session.serv
 import { AfterSalesService } from './after-sales.service.js';
 import { CaseRecordsService } from './case-records.service.js';
 import { ResolutionService } from './resolution.service.js';
+import { InterventionCommandsService } from './intervention-commands.service.js';
 
 @Controller()
 @UseGuards(JwtAuthGuard, CustomerOnlyGuard)
@@ -26,7 +28,14 @@ export class AfterSalesController {
     @Inject(AfterSalesService) private readonly cases: AfterSalesService,
     @Inject(CaseRecordsService) private readonly records: CaseRecordsService,
     @Inject(ResolutionService) private readonly resolutions: ResolutionService,
+    @Inject(InterventionCommandsService) private readonly interventions: InterventionCommandsService,
   ) {}
+  @Post('after-sales/:id/keep-confirmation')
+  @HttpCode(200)
+  keep(@CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(ResolutionCommandSchema)) input: ResolutionCommandInput, @Headers('idempotency-key') key: string) {
+    return this.interventions.keep({ actor, caseId: id.toLowerCase(), input, key, commandName: 'CASE_KEEP_CONFIRMED' });
+  }
   @Post('orders/:id/after-sales')
   open(
     @CurrentUser() actor: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string,

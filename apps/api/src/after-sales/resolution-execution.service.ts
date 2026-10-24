@@ -8,6 +8,8 @@ import type { CaseMutationContext, CaseTx } from './case.types.js';
 import { assertResolutionActionContext, resolutionActionBinding } from './resolution-approval.service.js';
 import { RESOLUTION_EXECUTORS, requiresFinancialApproval, type ExecutableResolution, type ResolutionExecutors } from './resolution-executor.port.js';
 import { assertResolutionNotExecuting, currentResolution, invalidResolution } from './resolution-policy.js';
+import { OrderInterventionService } from './order-intervention.service.js';
+import { CaseFinalizationService } from './case-finalization.service.js';
 
 @Injectable()
 export class ResolutionExecutionService {
@@ -16,6 +18,8 @@ export class ResolutionExecutionService {
     @Inject(ActionGrantService) private readonly grants: ActionGrantService,
     @Inject(RESOLUTION_EXECUTORS) private readonly executors: ResolutionExecutors,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(OrderInterventionService) private readonly intervention: OrderInterventionService,
+    @Inject(CaseFinalizationService) private readonly finalization: CaseFinalizationService,
   ) {}
 
   async start(context: OperatorActionContext, caseId: string, input: ResolutionExecutionInput, key: string): Promise<CaseCommandResult> {
@@ -47,6 +51,8 @@ export class ResolutionExecutionService {
       await ctx.tx.resolutionExecution.create({ data: { resolutionId: resolution.id, executionStep: 'START', action: financial ? 'EXECUTE_FUNDS' : 'RESUME_ORDER', actorId: context.actor.id, createdAt: ctx.now, progress: { create: { status: 'PENDING' } } } });
       await executor.planInTransaction(ctx, resolution);
       await ctx.tx.afterSalesCase.update({ where: { id: caseId }, data: { status: 'EXECUTING', agreementDeadline: null, responseDeadline: null, responseSide: null } });
+      if (resolution.type === 'CONTINUE_EXCHANGE') await this.intervention.resumeInTransaction(ctx, resolution);
+      await this.finalization.reconcileInTransaction(ctx);
       await ctx.tx.caseRecord.create({ data: { caseId, actorId: context.actor.id, kind: 'RESOLUTION_EXECUTION_STARTED', description: input.reason, details: { resolutionId: resolution.id, resolutionVersion: resolution.number, executionStep: 'START', sessionId: context.sessionId, deviceId: context.deviceId, grantId: context.grantId }, createdAt: ctx.now } });
     }, async tx => { fencedAuthorityIds = await lockExecutionAuthorities(tx, authorityIds); });
   }

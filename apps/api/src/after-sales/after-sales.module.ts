@@ -15,12 +15,18 @@ import { CaseRecordsService } from './case-records.service.js';
 import { ResolutionApprovalService } from './resolution-approval.service.js';
 import { ResolutionExecutionService } from './resolution-execution.service.js';
 import { RESOLUTION_EXECUTORS } from './resolution-executor.port.js';
+import { OrderInterventionService } from './order-intervention.service.js';
+import { CaseFinalizationService } from './case-finalization.service.js';
+import { CaseFundsStatusService } from '../compensation/case-funds-status.service.js';
+import { ReservationsModule } from '../reservations/reservations.module.js';
+import { InterventionCommandsService } from './intervention-commands.service.js';
+import { PaymentsModule } from '../payments/payments.module.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, ClockModule, OrdersModule, OperatorSecurityModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, ClockModule, OrdersModule, OperatorSecurityModule, ReservationsModule, PaymentsModule],
   controllers: [AfterSalesController, AdminAfterSalesController, AdminResolutionController],
-  providers: [AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, AdminAfterSalesService, ResolutionApprovalService, ResolutionExecutionService,
+  providers: [InterventionCommandsService, OrderInterventionService, CaseFinalizationService, CaseFundsStatusService, AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, AdminAfterSalesService, ResolutionApprovalService, ResolutionExecutionService,
     { provide: RESOLUTION_EXECUTORS, useFactory: () => new Map() }],
-  exports: [AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, ResolutionApprovalService, ResolutionExecutionService, RESOLUTION_EXECUTORS],
+  exports: [OrderInterventionService, CaseFinalizationService, AfterSalesService, CaseCommandsService, CaseRecordsService, ResolutionService, ResolutionApprovalService, ResolutionExecutionService, RESOLUTION_EXECUTORS],
 })
 export class AfterSalesModule {}

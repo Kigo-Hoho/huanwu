@@ -33,7 +33,7 @@ export class SettlementService {
   }
   // Event callers already lock order -> sorted items/leases -> funds. True owns
   // one terminal revision; false performs no mutation. No network/nested tx.
-  async tryFinalize(tx: OrderTx, orderId: string, now: Date): Promise<boolean> {
+  async tryFinalize(tx: OrderTx, orderId: string, now: Date, callerOwnsRevision = false): Promise<boolean> {
     await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId}::uuid FOR UPDATE`;
     let order = await readOrder(tx, orderId);
     if (!order || order.status !== 'SETTLING') return false;
@@ -48,7 +48,7 @@ export class SettlementService {
     if (ids.length < 2 || ids.length > 6 || items.length !== ids.length || leases.length !== ids.length || items.some(item => item.status !== 'ACTIVE' || item.ownerId !== order!.items.find(snapshot => snapshot.itemId === item.id)?.ownerId || item.reservation?.orderId !== orderId)) return false;
     await tx.item.updateMany({ where: { id: { in: ids } }, data: { status: 'INACTIVE', version: { increment: 1 } } });
     await this.reservations.releaseOrder(tx, orderId);
-    await tx.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: now, version: { increment: 1 } } });
+    await tx.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: now, ...(!callerOwnsRevision ? { version: { increment: 1 } } : {}) } });
     await this.audit.record(tx, { actorId: null, action: 'ORDER_COMPLETED', entityType: 'Order', entityId: orderId, before: { status: 'SETTLING' }, after: { status: 'COMPLETED', completedAt: now.toISOString(), itemIds: ids } });
     return true;
   }

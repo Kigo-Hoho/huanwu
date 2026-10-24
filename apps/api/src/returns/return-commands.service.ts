@@ -13,11 +13,13 @@ import { assertCaseParticipant, assertCurrentCustomer } from '../after-sales/cas
 import { readCase } from '../after-sales/case-reader.js';
 import { readOrder } from '../orders/order-reader.js';
 import { RiskTaskService } from '../risk/risk-task.service.js';
+import { CaseFinalizationService } from '../after-sales/case-finalization.service.js';
+import { ReservationsService } from '../reservations/reservations.service.js';
 
 export type ReturnCommandContext = Omit<CaseCommandContext, 'input'|'commandName'>;
 @Injectable()
 export class ReturnCommandsService {
-  constructor(@Inject(CaseCommandsService) private readonly commands: CaseCommandsService, @Inject(OutboxService) private readonly outbox: OutboxService, @Inject(INTEGRATION_CONFIG) private readonly config: IntegrationConfiguration, @Inject(PrismaService) private readonly prisma: PrismaService, @Inject(RiskTaskService) private readonly risks: RiskTaskService) {}
+  constructor(@Inject(CaseCommandsService) private readonly commands: CaseCommandsService, @Inject(OutboxService) private readonly outbox: OutboxService, @Inject(INTEGRATION_CONFIG) private readonly config: IntegrationConfiguration, @Inject(PrismaService) private readonly prisma: PrismaService, @Inject(RiskTaskService) private readonly risks: RiskTaskService, @Inject(CaseFinalizationService) private readonly finalization: CaseFinalizationService, @Inject(ReservationsService) private readonly reservations: ReservationsService) {}
   list(actor: AuthenticatedUser, caseId: string) {
     return this.prisma.$transaction(async tx => {
       await assertCurrentCustomer(tx, actor);
@@ -69,6 +71,7 @@ export class ReturnCommandsService {
   confirmReceived(context: ReturnCommandContext, raw: ReturnConfirmInput) {
     const parsed = ReturnConfirmSchema.safeParse(raw); if (!parsed.success) invalid(); const input = parsed.data;
     return this.commands.run({ ...context, input, commandName: 'RETURN_RECEIPT_DECIDED' }, async ctx => {
+      if (!['COMPLETED', 'CANCELLED'].includes(ctx.order.status)) await this.reservations.lockItems(ctx.tx, ctx.order.items.map(i => i.itemId));
       const { resolution, own } = await active(ctx, input.resolutionVersion);
       const obligation = await ctx.tx.returnObligation.findUnique({ where: { id: input.obligationId }, include: { progress: true } });
       if (!obligation || obligation.resolutionId !== resolution.id) returnNotReady();
@@ -78,6 +81,7 @@ export class ReturnCommandsService {
       await ctx.tx.returnProgress.update({ where: { obligationId: obligation.id }, data: { status: input.decision === 'CONFIRM' ? 'CONFIRMED' : 'DISPUTED', confirmedAt: input.decision === 'CONFIRM' ? ctx.now : null, version: { increment: 1 } } });
       await ctx.tx.returnEvent.create({ data: { obligationId: obligation.id, actorId: context.actor.id, kind: input.decision === 'CONFIRM' ? 'OWNER_CONFIRMED' : 'OWNER_DISPUTED', details: input.reason ? { reason: input.reason } : undefined, occurredAt: ctx.now } });
       if (input.decision === 'DISPUTE') await this.risks.recordInTransaction(ctx.tx, { sourceKey: `return:disputed:${obligation.id}`, kind: 'RETURN_DISPUTED', caseId: ctx.case.id, orderId: ctx.order.id, description: 'Original owner disputes the returned item; manual review is required' });
+      await this.finalization.reconcileInTransaction(ctx);
     });
   }
 }

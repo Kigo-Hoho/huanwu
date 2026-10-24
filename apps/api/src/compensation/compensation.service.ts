@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { OriginalFundsPlanSchema, ResolutionCommandSchema, type CaseCommandResult, type CompensationCheckoutView } from '@barter/contracts';
 import { CaseCommandsService } from '../after-sales/case-commands.service.js';
 import type { CaseCommandContext, CaseMutationContext } from '../after-sales/case.types.js';
@@ -27,7 +27,6 @@ export class CompensationService implements OnModuleInit {
   }
   async planInTransaction(ctx: CaseMutationContext, resolution: ExecutableResolution): Promise<void> {
     if (resolution.caseId !== ctx.case.id) throw fundsUnresolved();
-    if (resolution.type !== 'RETURN_ORIGINALS' && !resolution.netCompensationFen && !OriginalFundsPlanSchema.parse(resolution.originalFunds).some(f => f.destination !== 'RETAIN_FOR_EXCHANGE')) throw new ServiceUnavailableException({ code: 'RESOLUTION_EXECUTOR_UNAVAILABLE', message: 'Order-only finalization requires its registered executor' });
     for (const target of OriginalFundsPlanSchema.parse(resolution.originalFunds)) {
       if (target.destination === 'RETAIN_FOR_EXCHANGE') continue;
       const p = await ctx.tx.paymentIntent.findUniqueOrThrow({ where: { id: target.paymentIntentId }, include: { entries: true } });

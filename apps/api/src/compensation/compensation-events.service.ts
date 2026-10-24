@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { CaseFinalizationService } from '../after-sales/case-finalization.service.js';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -8,7 +9,7 @@ import { OutboxService } from '../integrations/outbox.service.js';
 import { compensationIdentity } from './compensation-ledger.js';
 @Injectable()
 export class CompensationEventsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(AuditService) private readonly audit: AuditService, @Inject(OutboxService) private readonly outbox: OutboxService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(AuditService) private readonly audit: AuditService, @Inject(OutboxService) private readonly outbox: OutboxService, @Inject(CaseFinalizationService) private readonly finalization: CaseFinalizationService) {}
   async applyVerified(event: VerifiedIntegrationEvent): Promise<void> {
     if ('shipmentId' in event) throw new BadRequestException('Expected financial event');
     const identity = compensationIdentity(event);
@@ -58,5 +59,6 @@ export class CompensationEventsService {
       const waiting = await this.prisma.integrationEvent.findMany({ where: { businessNo: { in: [`compensation:refund:${association.id}`, `compensation:disburse:${association.id}`] }, receipt: { status: 'PENDING' } } });
       for (const fact of waiting) await this.applyVerified(fact.payload as unknown as VerifiedIntegrationEvent);
     }
+    if (association) await this.finalization.reconcile(association.obligation.resolution.caseId);
   }
 }

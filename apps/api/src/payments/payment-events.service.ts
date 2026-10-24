@@ -12,10 +12,12 @@ import { ReservationsService } from '../reservations/reservations.service.js';
 import { OrderHoldService } from '../orders/order-hold.service.js';
 import { SettlementService } from './settlement.service.js';
 import { OrderExpiryService } from '../orders/order-expiry.service.js';
+import { OrderFactsService } from '../orders/order-facts.service.js';
 
 @Injectable()
 export class PaymentEventsService {
   constructor(
+    @Inject(OrderFactsService) private readonly facts: OrderFactsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
@@ -142,5 +144,6 @@ export class PaymentEventsService {
       const waiting = await this.prisma.integrationEvent.findMany({ where: { businessNo: { in: [`refund:${association.id}`, `settle:${association.id}`] }, receipt: { status: 'PENDING', reason: 'PAYMENT_NOT_RECORDED' } } });
       for (const pending of waiting) await this.applyVerified(pending.payload as unknown as VerifiedIntegrationEvent);
     }
+    if (association) await this.facts.notify(association.orderId);
   }
 }

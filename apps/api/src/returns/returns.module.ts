@@ -15,5 +15,6 @@ import { ReturnPlanService } from './return-plan.service.js';
 import { ReturnsController } from './returns.controller.js';
 import { ReturnSimulationService } from './return-simulation.service.js';
 import { ReturnEventReconciler } from './return-event-reconciler.js';
-@Module({ imports: [AfterSalesModule, AuditModule, AuthModule, ClockModule, DatabaseModule, IntegrationsModule], controllers: [ReturnsController], providers: [AddressCipher, RiskTaskService, ReturnAddressService, ReturnCommandsService, ReturnEventsService, ReturnLogisticsHandler, ReturnPlanService, ReturnSimulationService, ReturnEventReconciler], exports: [ReturnAddressService, ReturnCommandsService, ReturnEventsService, ReturnPlanService, ReturnSimulationService] })
+import { ReservationsModule } from '../reservations/reservations.module.js';
+@Module({ imports: [ReservationsModule, AfterSalesModule, AuditModule, AuthModule, ClockModule, DatabaseModule, IntegrationsModule], controllers: [ReturnsController], providers: [AddressCipher, RiskTaskService, ReturnAddressService, ReturnCommandsService, ReturnEventsService, ReturnLogisticsHandler, ReturnPlanService, ReturnSimulationService, ReturnEventReconciler], exports: [ReturnAddressService, ReturnCommandsService, ReturnEventsService, ReturnPlanService, ReturnSimulationService] })
 export class ReturnsModule {}

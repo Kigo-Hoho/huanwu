@@ -9,6 +9,7 @@ import { FinancialEventReconciler } from '../../src/compensation/financial-event
 import { PaymentEventsService } from '../../src/payments/payment-events.service.js';
 import { INTEGRATION_CONFIG } from '../../src/integrations/integration-config.js';
 import { createCompensationHarness, type CompensationHarness } from './support/compensation-harness.js';
+import { CaseFinalizationService } from '../../src/after-sales/case-finalization.service.js';
 let h: CompensationHarness;
 beforeAll(async () => { h = await createCompensationHarness(); });
 afterAll(async () => { await h?.close(); });
@@ -60,7 +61,7 @@ it('refunds the original deposit once with its original refund number after appr
   expect(await h.prisma.paymentIntent.count({ where: { orderId: f.order.id } })).toBe(1);
   const claim = await h.prisma.resolutionExecution.findFirstOrThrow({ where: { executionStep: `CLAIM:refund:${p.id}` }, include: { progress: true } });
   expect(claim.progress?.status).toBe('SUCCEEDED');
-  expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('ON_HOLD');
+  expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('CANCELLED');
 });
 async function prepared(type: 'KEEP_WITH_COMPENSATION'|'CONTINUE_EXCHANGE' = 'KEEP_WITH_COMPENSATION') {
   const f = await h.fixture({ type }); await f.execute();
@@ -102,7 +103,7 @@ it('recovers accepted payment after a new reconciler instance starts without cus
   const { p, paid } = await prepared();
   await h.app.get(SimulatedProviderStore).recordEvent(paid);
   h.faultAuditOnce(true); await expect(h.app.get(CompensationEventsService).applyVerified(paid)).rejects.toThrow('Injected'); vi.restoreAllMocks();
-  const recovery = new FinancialEventReconciler(h.prisma, h.app.get(CompensationEventsService), h.app.get(PaymentEventsService), h.app.get(INTEGRATION_CONFIG));
+  const recovery = new FinancialEventReconciler(h.prisma, h.app.get(CompensationEventsService), h.app.get(PaymentEventsService), h.app.get(INTEGRATION_CONFIG), h.app.get(CaseFinalizationService));
   await recovery.tick(); await recovery.onModuleDestroy();
   expect(await h.prisma.compensationFinancialEntry.count({ where: { paymentId: p.id, entryType: 'COLLECTION' } })).toBe(1);
 });
@@ -167,6 +168,6 @@ it('reconciles an already successful disbursement after approval revocation with
 it('retains unpaid CONTINUE_EXCHANGE compensation and never releases original reservations', async () => {
   const f = await h.fixture({ type: 'CONTINUE_EXCHANGE' }); await f.execute();
   expect(await h.prisma.compensationObligation.count({ where: { resolution: { caseId: f.caseId } } })).toBe(1);
-  expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('ON_HOLD');
+  expect((await h.prisma.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('AWAITING_PAYMENT');
   expect(await h.prisma.itemReservation.count({ where: { orderId: f.order.id } })).toBeGreaterThan(0);
 });

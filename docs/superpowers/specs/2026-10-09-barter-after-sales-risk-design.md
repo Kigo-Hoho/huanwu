@@ -106,6 +106,10 @@ Task9 资金接口澄清（2026-10-22）：客户 `POST /api/after-sales/:caseId
 
 ### 8.1 有边界的恢复
 
+Task10 接口澄清（2026-10-23）：客户 `POST /api/after-sales/:id/keep-confirmation` 使用当前工单/订单/方案版本及幂等键；只有本人已交付事实存在时记录本人独立“收到并保留全部物品”，方案同意不替代此事实。运营 `POST /api/admin/after-sales/:id/extend-deadline` 增加 `kind=DETAILS|PAYMENT|FULFILLMENT|ACCEPTANCE`，仅 ACCEPTANCE 可指定 side，及 reason/operatorAction；沿用既有桌面 SUPER_ADMIN 的 RESUME_ORDER 动作授权，完整正文哈希包括 kind/side，恢复执行的严格正文不能复用该授权。每订单每类仅一次，截止为批准服务器时间加 72 小时。
+
+收尾通过订单先于工单的事务再次读取资金、归还、风险及 CLAIM 进度；任意在途/UNKNOWN CLAIM 阻止结案。可信资金事实先持久提交，再通知独立收尾事务；失败由资金恢复器有界扫描 EXECUTING 工单重试，收尾状态、物品、占用和审计仍同事务。独立归还确认可在原命令事务内触发收尾。正常合法结案后才允许既有后续工单入口；本阶段不新增任意取消补偿授权，未定义终止动作时 close/refund 端口保持不可发起。已安全恢复的订单不会因为独立补偿待完成再次自动暂停。
+
 不提供任意 `setStatus`。CONTINUE_EXCHANGE 方案经过确认和必要审批后，依据最新可信资金、物流、验收事实重新计算允许的下一状态，而不是盲目恢复 holdPreviousStatus。仍有活跃风险、资金未知或其他工单阻塞则拒绝恢复。
 
 运营最多延长同一订单每类详情、支付、发货或验收期限一次，延长 72 小时，起点是批准时服务端时间；记录原截止、新截止、原因及受影响方。不能修改已完成事实，不能延长一方期限就默认另一方同意改变商品或价格。待执行方案、未查询的原资金指令先对账后恢复。恢复与期限修改都校验工单及订单版本。
