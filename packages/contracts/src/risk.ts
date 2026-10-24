@@ -39,3 +39,7 @@ export type RiskReportView = z.infer<typeof RiskReportViewSchema>;
 export type AdminRiskReportView = z.infer<typeof AdminRiskReportViewSchema>;
 export type RiskReportListView = z.infer<typeof RiskReportListViewSchema>;
 export type TradingRestrictionView = z.infer<typeof TradingRestrictionViewSchema>;
+export type RiskReportDetail = z.infer<typeof RiskReportDetailSchema>;
+export type RiskTaskView = z.infer<typeof RiskTaskViewSchema>;
+export type RiskTaskListView = z.infer<typeof RiskTaskListViewSchema>;
+export type RiskRecordView = z.infer<typeof RiskRecordViewSchema>;

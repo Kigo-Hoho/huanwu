@@ -137,3 +137,5 @@ export type CaseDetailView = z.infer<typeof CaseDetailViewSchema>;
 export type AdminCaseDetailView = z.infer<typeof AdminCaseDetailViewSchema>;
 export type AdminCaseListView = z.infer<typeof AdminCaseListViewSchema>;
 export type AdminCaseCommandResult = z.infer<typeof AdminCaseCommandResultSchema>;
+export type AdminResolutionView = z.infer<typeof AdminResolutionViewSchema>;
+export type AdminResolutionContext = z.infer<typeof AdminResolutionContextSchema>;

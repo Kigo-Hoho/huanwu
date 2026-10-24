@@ -277,6 +277,8 @@ export function createApiClient(options: {
 
     logout() {
       window.sessionStorage.removeItem(sessionKey);
+      window.sessionStorage.removeItem('barter-admin-operator-session');
+      window.dispatchEvent(new Event('barter:auth-expired'));
     },
 
     listPendingItems() {
