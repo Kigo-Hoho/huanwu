@@ -23,10 +23,9 @@ export function assertOperatorOrigin(request: Request): void {
   if (!origin || !operatorOrigins().includes(origin) || request.headers['sec-fetch-site'] === 'cross-site') throw new ForbiddenException('Trusted operator origin is required');
 }
 function cookieCredential(request: Request): string | undefined {
-  const values = request.headers.cookie?.split(';').map(v => v.trim()).filter(v => v.startsWith(`${DEVICE_COOKIE}=`));
-  if (values?.length !== 1) return undefined;
-  const value = values[0].slice(DEVICE_COOKIE.length + 1);
-  return /^[a-f0-9]{64}$/.test(value) ? value : undefined;
+  const values = request.headers.cookie?.split(';').map(v => v.trim()).filter(v => v.startsWith(`${DEVICE_COOKIE}=`)).map(v => v.slice(DEVICE_COOKIE.length + 1));
+  const unique = [...new Set(values?.filter(v => /^[a-f0-9]{64}$/.test(v)))];
+  return unique.length === 1 ? unique[0] : undefined;
 }
 @Injectable()
 export class OperatorSessionService {

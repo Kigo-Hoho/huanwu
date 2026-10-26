@@ -97,6 +97,14 @@ describe('operator security HTTP boundary', () => {
     expect((await h.securityCommand(s, 'grants', payload).set('Cookie', other.cookie)).status).toBe(401);
   });
 
+  it('accepts a repeated identical device cookie and rejects two different secrets', async () => {
+    const s = await h.operatorLogin(h.actors.reviewer);
+    const payload = { ...binding(), action: 'FREEZE_TRADING', password: h.operatorPassword };
+    const other = await h.operatorLogin(h.actors.superAdminTwo);
+    expect((await h.securityCommand(s, 'grants', payload).set('Cookie', `${s.cookie}; ${s.cookie}`)).status).toBe(200);
+    expect((await h.securityCommand(s, 'grants', payload).set('Cookie', `${s.cookie}; ${other.cookie}`)).status).toBe(401);
+  });
+
   it('expires mobile sessions exactly at 15 minutes and observes current role revocation', async () => {
     const s = await h.operatorLogin(h.actors.reviewer);
     const payload = { ...binding(), action: 'FREEZE_TRADING' };

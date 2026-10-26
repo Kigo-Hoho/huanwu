@@ -100,6 +100,29 @@ it('reauth dialog passes password once and does not keep it after confirm', asyn
   expect(screen.getByLabelText('管理员密码')).toHaveValue('');
 });
 
+it('does not query devices before a bound operator session exists', async () => {
+  const listDevices = vi.fn();
+  const listSessions = vi.fn();
+  const client = {
+    listDevices,
+    currentDevice: vi.fn(),
+    listSessions,
+    revokeSession: vi.fn(),
+    securityLogin: vi.fn(),
+    clearSensitiveState: vi.fn(),
+    getBoundSession: () => null,
+    onIdentityChange: () => () => undefined,
+  };
+  render(
+    <MemoryRouter future={routerFuture}>
+      <DevicePage client={client} />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole('button', { name: '绑定设备登录' })).toBeVisible();
+  expect(listDevices).not.toHaveBeenCalled();
+  expect(listSessions).not.toHaveBeenCalled();
+});
+
 it('surfaces revoke session API failures clearly', async () => {
   const revokeSession = vi.fn().mockRejectedValue(new ApiError(409, { code: 'VALIDATION_FAILED', message: 'version conflict', requestId: 'r' }));
   const client = {
@@ -109,7 +132,7 @@ it('surfaces revoke session API failures clearly', async () => {
     revokeSession,
     securityLogin: vi.fn(),
     clearSensitiveState: vi.fn(),
-    getBoundSession: () => null,
+    getBoundSession: () => session(),
     onIdentityChange: () => () => undefined,
   };
   render(

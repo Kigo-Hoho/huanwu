@@ -33,9 +33,9 @@ test('two customers dispute, return originals with dual desktop approval, and it
     await consentBoth(exchange, caseId);
     await saveReturnAddresses(exchange, caseId);
     await dualApproveAndExecute(operators.admin1, operators.admin2, caseId);
-    await waitOutboxKinds(orderId, ['REFUND_PAYMENT', 'CLOSE_PAYMENT']);
     await closeOriginalShipments(exchange, caseId, orderId);
     await registerAndProgressReturns(exchange, caseId, orderId);
+    await waitOutboxKinds(orderId, ['REFUND_PAYMENT', 'CLOSE_PAYMENT']);
     await expect.poll(async () => {
       const rows = await readOwned(`SELECT status FROM "AfterSalesCase" WHERE id=$1::uuid`, [caseId]);
       return rows[0]?.status;

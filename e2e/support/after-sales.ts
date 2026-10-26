@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { CaseDetailView, OrderView, ResolutionInput } from '@barter/contracts';
 import pg from 'pg';
@@ -10,6 +12,7 @@ import {
 } from './orders';
 
 export const adminApp = 'http://127.0.0.1:5173';
+const DEVICE_COOKIE = 'barter_operator_device';
 const password = () => {
   const value = process.env.E2E_REVIEWER_PASSWORD;
   if (!value) throw new Error('E2E_REVIEWER_PASSWORD required');
@@ -65,17 +68,27 @@ async function readOwned(sql: string, values: unknown[]) {
 export async function waitFundsReady(orderId: string) {
   await expect.poll(async () => {
     const rows = await readOwned(
-      `SELECT status FROM "OutboxCommand" WHERE "orderId"=$1::uuid AND kind = ANY($2::text[])`,
+      `SELECT status FROM "OutboxCommand" WHERE "orderId"=$1::uuid AND kind::text = ANY($2::text[])`,
       [orderId, ['CREATE_PAYMENT', 'CLOSE_PAYMENT', 'REFUND_PAYMENT', 'SETTLE_DIFFERENCE']],
     );
     return rows.length > 0 && rows.every((row: { status: string }) => row.status === 'SUCCEEDED');
   }, { timeout: 60_000 }).toBe(true);
 }
 
+async function waitSimulatedOperations(orderId: string, kind: string, minimum: number) {
+  await expect.poll(async () => {
+    const rows = await readOwned(
+      `SELECT status FROM "SimulatedProviderOperation" WHERE "orderId"=$1::uuid AND kind::text = $2`,
+      [orderId, kind],
+    );
+    return rows.length >= minimum;
+  }, { timeout: 60_000 }).toBe(true);
+}
+
 export async function waitOutboxKinds(orderId: string, kinds: string[]) {
   await expect.poll(async () => {
     const rows = await readOwned(
-      `SELECT kind, status FROM "OutboxCommand" WHERE "orderId"=$1::uuid AND kind = ANY($2::text[])`,
+      `SELECT kind, status FROM "OutboxCommand" WHERE "orderId"=$1::uuid AND kind::text = ANY($2::text[])`,
       [orderId, kinds],
     );
     return rows.filter((row: { status: string }) => row.status === 'PENDING' || row.status === 'PROCESSING').length;
@@ -139,48 +152,99 @@ function bootstrapDevice(deviceId: string) {
   expect(result.status, result.stderr || result.stdout || 'bootstrap failed').toBe(0);
 }
 
+async function postBound(context: BrowserContext, token: string, path: string, data: unknown) {
+  // Restored SameSite=Strict device cookies stay in the browser document but
+  // are omitted by Playwright's request client and by fetch inside evaluate.
+  const secret = await readDeviceCookie(context);
+  const response = await fetch(`http://127.0.0.1:3000${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Origin: adminApp,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': randomUUID(),
+      Cookie: `${DEVICE_COOKIE}=${secret}`,
+    },
+    body: JSON.stringify(data),
+  });
+  return { status: response.status, text: await response.text() };
+}
+
 async function approveDeviceViaHttp(approver: OperatorBundle, targetDeviceId: string, expectedVersion: number) {
   const business = { expectedVersion, reason: 'e2e second desktop device' };
-  const grant = await approver.page.request.post(`${adminApp}/api/admin/security/grants`, {
-    headers: {
-      Authorization: `Bearer ${approver.token}`,
-      Origin: adminApp,
-      'Idempotency-Key': randomUUID(),
-    },
-    data: {
-      action: 'APPROVE_DEVICE',
-      resourceId: targetDeviceId,
-      expectedVersions: { expectedVersion },
-      requestHash: operatorRequestHash(business),
-      password: password(),
-    },
+  const grant = await postBound(approver.context, approver.token, '/api/admin/security/grants', {
+    action: 'APPROVE_DEVICE',
+    resourceId: targetDeviceId,
+    expectedVersions: { expectedVersion },
+    requestHash: operatorRequestHash(business),
+    password: password(),
   });
-  expect(grant.status(), await grant.text()).toBe(200);
-  const grantBody = await grant.json();
-  const approved = await approver.page.request.post(`${adminApp}/api/admin/security/devices/${targetDeviceId}/approve`, {
-    headers: {
-      Authorization: `Bearer ${approver.token}`,
-      Origin: adminApp,
-      'Idempotency-Key': randomUUID(),
-    },
-    data: {
-      ...business,
-      operatorAction: { sessionId: approver.sessionId, grantId: grantBody.id },
-    },
+  expect(grant.status, grant.text).toBe(200);
+  const grantBody = JSON.parse(grant.text) as { id: string };
+  const approved = await postBound(approver.context, approver.token, `/api/admin/security/devices/${targetDeviceId}/approve`, {
+    ...business,
+    operatorAction: { sessionId: approver.sessionId, grantId: grantBody.id },
   });
-  expect(approved.status(), await approved.text()).toBe(200);
+  expect(approved.status, approved.text).toBe(200);
+}
+
+function desktopCookiePath(): string {
+  const name = process.env.BARTER_E2E_DATABASE_NAME;
+  if (!name || !/^barter_p3_[a-f0-9]{16}_[a-f0-9]{12}$/.test(name)) {
+    throw new Error('Owned database name required before reusing a bootstrapped desktop');
+  }
+  return join(tmpdir(), `barter-e2e-desktop-${name}`);
+}
+
+async function rememberedDesktopCookie(): Promise<string | null> {
+  try {
+    const value = (await readFile(desktopCookiePath(), 'utf8')).trim();
+    return /^[a-f0-9]{64}$/.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function rememberDesktopCookie(value: string): Promise<void> {
+  const path = desktopCookiePath();
+  await mkdir(tmpdir(), { recursive: true });
+  await writeFile(path, value, { encoding: 'utf8', mode: 0o600 });
+  await chmod(path, 0o600);
+}
+
+async function installDeviceCookie(context: BrowserContext, value: string): Promise<void> {
+  await context.addCookies([{
+    name: DEVICE_COOKIE,
+    value,
+    url: `${adminApp}/api`,
+    httpOnly: true,
+    sameSite: 'Strict',
+  }]);
+}
+
+async function readDeviceCookie(context: BrowserContext): Promise<string> {
+  const cookies = (await context.cookies()).filter((item) => item.name === DEVICE_COOKIE && /^[a-f0-9]{64}$/.test(item.value));
+  const preferred = cookies.filter((item) => item.path === '/api');
+  const cookie = (preferred.length ? preferred : cookies).at(-1);
+  if (!cookie) throw new Error('operator device cookie missing');
+  return cookie.value;
 }
 
 export async function prepareOperators(browser: Browser) {
   const desktop = { viewport: { width: 1280, height: 800 } };
   const mobile = { viewport: { width: 390, height: 844 } };
+  const existingDesktop = await rememberedDesktopCookie();
 
   const admin1Context = await browser.newContext(desktop);
+  if (existingDesktop) await installDeviceCookie(admin1Context, existingDesktop);
   const admin1Page = await admin1Context.newPage();
   await passwordLogin(admin1Page, 'super-admin@barter.local');
   let bound = await securityBind(admin1Page, 'super-admin@barter.local');
-  bootstrapDevice(bound.deviceId);
-  bound = await securityBind(admin1Page, 'super-admin@barter.local');
+  if (bound.capability !== 'DESKTOP_PRIVILEGED') {
+    bootstrapDevice(bound.deviceId);
+    bound = await securityBind(admin1Page, 'super-admin@barter.local');
+    await rememberDesktopCookie(await readDeviceCookie(admin1Context));
+  }
   expect(bound.capability).toBe('DESKTOP_PRIVILEGED');
   const admin1: OperatorBundle = {
     context: admin1Context,
@@ -255,6 +319,8 @@ export async function openAfterSalesCase(exchange: Exchange, orderId: string, re
 }
 
 export async function uploadEvidence(page: Page, description: string) {
+  await page.reload();
+  await expect(page.getByLabel('证据说明', { exact: true })).toBeVisible({ timeout: 30_000 });
   await page.getByLabel('证据说明', { exact: true }).locator('input').fill(description);
   const chooserPromise = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /选择图片/ }).click();
@@ -275,9 +341,8 @@ export async function uploadEvidence(page: Page, description: string) {
 export async function proposeReturnViaUi(ops: OperatorBundle, caseId: string) {
   await ops.page.goto(`${adminApp}/after-sales/${caseId}`);
   await expect(ops.page.getByRole('heading', { name: '售后工单详情' })).toBeVisible();
-  await expect(ops.page.getByLabel('方案类型')).toBeVisible();
-  await ops.page.getByLabel('方案类型').click();
-  await ops.page.getByText('退回原物', { exact: true }).click();
+  // The draft defaults to 退回原物. Opening the 390px select never finishes its click.
+  await expect(ops.page.locator('.ant-select-selection-item', { hasText: '退回原物' })).toBeVisible();
   await ops.page.getByLabel('方案原因').fill('e2e 退回原物方案');
   const proposed = ops.page.waitForResponse(
     (r) => r.url().includes(`/api/admin/after-sales/${caseId}/resolutions`) && r.request().method() === 'POST',
@@ -401,7 +466,7 @@ export async function dualApproveAndExecute(admin1: OperatorBundle, admin2: Oper
 }
 
 export async function closeOriginalShipments(exchange: Exchange, caseId: string, orderId: string) {
-  await waitOutboxKinds(orderId, ['CLOSE_OR_INTERCEPT']);
+  await waitSimulatedOperations(orderId, 'CLOSE_OR_INTERCEPT', 2);
   const shipments = await readOwned(
     `SELECT id, side FROM "Shipment" WHERE "orderId"=$1::uuid`,
     [orderId],
@@ -451,7 +516,7 @@ export async function registerAndProgressReturns(exchange: Exchange, caseId: str
     expect(response.ok(), `register return HTTP ${response.status()} ${await response.text()}`).toBe(true);
   }
 
-  await waitOutboxKinds(orderId, ['VERIFY_RETURN']);
+  await waitSimulatedOperations(orderId, 'VERIFY_RETURN', 2);
   const returnShipments = await readOwned(
     `SELECT rs.id, rs."holderSide" FROM "ReturnShipment" rs
      JOIN "ResolutionVersion" rv ON rv.id = rs."resolutionId"
@@ -490,19 +555,36 @@ export async function registerAndProgressReturns(exchange: Exchange, caseId: str
   }
 
   for (const page of [exchange.initiator, exchange.recipient]) {
-    await page.goto(`${app}/pages/after-sales/detail/index?id=${caseId}`);
-    await expect(page.getByRole('button', { name: '确认收到退货', exact: true }).first()).toBeVisible({ timeout: 60_000 });
+    const open = async () => {
+      await page.goto(`${app}/pages/after-sales/detail/index?id=${caseId}`);
+      // The return list arrives with the detail payload. Counting buttons before
+      // that paint treats a second delivered obligation as already confirmed.
+      await expect(page.getByText(/持有 /).first()).toBeVisible({ timeout: 60_000 });
+    };
+    await open();
     while (await page.getByRole('button', { name: '确认收到退货', exact: true }).count()) {
       const pending = page.waitForResponse(
         (r) => r.url().includes(`/api/after-sales/${caseId}/returns/`) && r.url().includes('/returns/confirmation') && r.request().method() === 'POST',
       );
       await page.getByRole('button', { name: '确认收到退货', exact: true }).first().click();
       const response = await pending;
-      expect(response.ok(), `confirm return HTTP ${response.status()}`).toBe(true);
-      await page.reload();
-      await page.goto(`${app}/pages/after-sales/detail/index?id=${caseId}`);
+      expect(response.ok(), `confirm return HTTP ${response.status()} ${await response.text()}`).toBe(true);
+      await open();
     }
   }
+  const progress = await readOwned(
+    `SELECT rp.status FROM "ReturnProgress" rp
+     JOIN "ReturnObligation" ro ON ro.id = rp."obligationId"
+     JOIN "ResolutionVersion" rv ON rv.id = ro."resolutionId"
+     WHERE rv."caseId" = $1::uuid`,
+    [caseId],
+  );
+  const statuses = progress.map((row: { status: string }) => row.status);
+  expect(statuses.length, 'return obligations').toBeGreaterThan(0);
+  expect(
+    statuses.every((status: string) => ['CONFIRMED', 'INTERCEPTED', 'UNRETURNABLE'].includes(status)),
+    statuses.join(','),
+  ).toBe(true);
 }
 
 export async function confirmKeepBoth(exchange: Exchange, caseId: string) {
@@ -526,12 +608,25 @@ export async function payCompensation(exchange: Exchange, caseId: string) {
   );
   await exchange.initiator.getByRole('button', { name: '发起补偿付款', exact: true }).click();
   expect((await requested).ok()).toBe(true);
+  await expect.poll(async () => {
+    const rows = await readOwned(
+      `SELECT spo.status FROM "SimulatedProviderOperation" spo
+       JOIN "CompensationPayment" cp ON cp."businessNo" = spo."businessNo"
+       JOIN "CompensationObligation" co ON co.id = cp."obligationId"
+       JOIN "ResolutionVersion" rv ON rv.id = co."resolutionId"
+       WHERE rv."caseId"=$1::uuid AND spo.kind::text = 'CREATE_COMPENSATION'`,
+      [caseId],
+    );
+    return rows[0]?.status ?? null;
+  }, { timeout: 60_000 }).toBe('PENDING');
+  await exchange.initiator.goto(`${app}/pages/after-sales/detail/index?id=${caseId}`);
   await expect(exchange.initiator.getByRole('button', { name: '完成测试补偿', exact: true })).toBeVisible({ timeout: 60_000 });
   const completed = exchange.initiator.waitForResponse(
     (r) => r.url().includes('/api/testing/compensation/') && r.request().method() === 'POST',
   );
   await exchange.initiator.getByRole('button', { name: '完成测试补偿', exact: true }).click();
-  expect((await completed).ok()).toBe(true);
+  const response = await completed;
+  expect(response.ok(), `complete compensation HTTP ${response.status()} ${await response.text()}`).toBe(true);
 }
 
 export async function assertThirdPartyEvidenceDenied(browser: Browser, caseId: string) {
@@ -575,7 +670,7 @@ export async function assertItemsNotRelisted(exchange: Exchange) {
 
 export async function assertNoSecondPaymentCharge(orderId: string) {
   const payments = await readOwned(
-    `SELECT purpose, status, COUNT(*)::int AS count FROM "PaymentIntent" WHERE "orderId"=$1::uuid GROUP BY purpose, status`,
+    `SELECT side, purpose, status, COUNT(*)::int AS count FROM "PaymentIntent" WHERE "orderId"=$1::uuid GROUP BY side, purpose, status`,
     [orderId],
   );
   const creates = await readOwned(
