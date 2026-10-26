@@ -14,7 +14,9 @@ if (!deviceId || !reason || extra.length) {
     app = await NestFactory.createApplicationContext(OperatorSecurityModule, { logger: false, abortOnError: false });
     await app.get(OperatorDeviceService).approveDevice(deviceId, reason);
     console.log('Existing pending operator device approved through server administration.');
-  } catch {
+  } catch (error) {
+    const raw = error instanceof Error ? `${error.name}: ${error.message}` : 'non-error';
+    console.error(raw.replace(/postgres(?:ql)?:\/\/\S+/gi, 'postgresql://redacted'));
     console.error('Operator device approval rejected. Check pending state and bootstrap eligibility.');
     process.exitCode = 1;
   } finally { await app?.close(); }

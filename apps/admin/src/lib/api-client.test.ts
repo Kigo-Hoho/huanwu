@@ -56,6 +56,26 @@ describe('authenticated API client', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('keeps the password session when a bound operator session is required', async () => {
+    window.sessionStorage.setItem('barter-admin-session', JSON.stringify({
+      accessToken: 'operator-token',
+      expiresAt: Date.now() + 60_000,
+      user: { id: 'operator-1', roles: ['SUPER_ADMIN'] },
+    }));
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(401, {
+      code: 'REAUTH_REQUIRED',
+      message: 'Bound operator session required',
+      requestId: 'request-reauth',
+    }));
+    const onExpired = vi.fn();
+    window.addEventListener('barter:auth-expired', onExpired, { once: true });
+    const client = createApiClient({ fetchImpl: fetchMock });
+
+    await expect(client.listPendingItems()).rejects.toMatchObject({ status: 401, code: 'REAUTH_REQUIRED' } satisfies Partial<ApiError>);
+    expect(loadStoredSession()?.accessToken).toBe('operator-token');
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
   it('clears expired authentication and does not replay a review', async () => {
     window.sessionStorage.setItem('barter-admin-session', JSON.stringify({
       accessToken: 'expired-token',

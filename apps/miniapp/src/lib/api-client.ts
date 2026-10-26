@@ -140,7 +140,7 @@ export class AuthenticatedApiClient {
   }
 
 
-  async afterSalesMultipart(path: AfterSalesRequestPath, build: (token: string) => Promise<{ statusCode: number; data: unknown }>, key?: string): Promise<unknown> {
+  async afterSalesMultipart(path: AfterSalesRequestPath, build: (token: string) => Promise<{ statusCode: number; data: unknown }>): Promise<unknown> {
     const initiating = this.session.getIdentity();
     const check = () => {
       const current = this.session.getIdentity();

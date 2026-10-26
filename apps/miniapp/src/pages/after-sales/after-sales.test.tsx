@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CaseDetailView, Role } from '@barter/contracts';
 import { AfterSalesApi } from '../../features/after-sales/after-sales-api';
@@ -65,7 +65,11 @@ function harness(detail: CaseDetailView = caseDetail(), roles: Role[] = ['CUSTOM
       order.parties[0]!.userId = currentActor;
       return { statusCode: 200, data: order };
     }
-    const { records, evidence, resolutions, compensation, ...caseView } = current;
+    const caseView: Record<string, unknown> = { ...current };
+    delete caseView.records;
+    delete caseView.evidence;
+    delete caseView.resolutions;
+    delete caseView.compensation;
     return { statusCode: 200, data: { case: caseView, orderVersion: 5 } };
   });
   const client = new AuthenticatedApiClient('http://localhost:3000', session, request);
@@ -145,7 +149,7 @@ describe('customer after-sales pages', () => {
     const submit = vi.fn().mockResolvedValue({ id: id(80), targetType: 'ITEM', targetId: id(1), reason: 'PROHIBITED_ITEM', description: '违禁', status: 'OPEN', version: 1, createdAt: '2026-10-08T00:00:00.000Z', updatedAt: '2026-10-08T00:00:00.000Z' });
     render(<ReportForm targetType="ITEM" targetId={id(1)} expectedTargetVersion={1} visible onSubmit={submit} />);
     expect(screen.getByRole('button', { name: '提交举报' })).toBeVisible();
-    const { rerender } = render(<ReportForm targetType="ITEM" targetId={id(1)} expectedTargetVersion={1} visible={false} onSubmit={submit} />);
+    render(<ReportForm targetType="ITEM" targetId={id(1)} expectedTargetVersion={1} visible={false} onSubmit={submit} />);
     expect(screen.queryAllByRole('button', { name: '提交举报' })).toHaveLength(1);
   });
 

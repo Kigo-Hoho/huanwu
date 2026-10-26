@@ -29,8 +29,8 @@ test('keep with compensation collects simulated payment and closes the case', as
     await proposeKeepViaHttp(operators.ops, caseId, 500);
     await consentBoth(exchange, caseId);
     await dualApproveAndExecute(operators.admin1, operators.admin2, caseId);
-    await waitOutboxKinds(orderId, ['REFUND_PAYMENT', 'CLOSE_PAYMENT']);
     await confirmKeepBoth(exchange, caseId);
+    await waitOutboxKinds(orderId, ['REFUND_PAYMENT', 'CLOSE_PAYMENT']);
     await payCompensation(exchange, caseId);
     await expect.poll(async () => {
       const rows = await readOwned(`SELECT status FROM "AfterSalesCase" WHERE id=$1::uuid`, [caseId]);

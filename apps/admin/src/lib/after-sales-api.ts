@@ -24,6 +24,7 @@ import {
   RiskTaskListViewSchema,
   TradingRestrictionViewSchema,
   type ActionGrantView,
+  type ApiErrorBody,
   type AdminCaseCommandResult,
   type AdminCaseDetailView,
   type AdminCaseListView,
@@ -196,11 +197,13 @@ function createRequest(client: AdminApiClient & { request?: RequestFn }, fetchIm
     if (!response.ok) {
       const fallback =
         response.status === 401 ? 'AUTH_REQUIRED' : response.status === 403 ? 'FORBIDDEN' : 'VALIDATION_FAILED';
-      const errorBody =
+      const errorBody: ApiErrorBody =
         body && typeof body === 'object' && 'code' in body && 'message' in body && 'requestId' in body
-          ? (body as { code: typeof fallback; message: string; requestId: string; details?: unknown })
-          : { code: fallback as 'AUTH_REQUIRED', message: response.statusText || '请求失败', requestId: '' };
-      if (response.status === 401 || errorBody.code === 'AUTH_REQUIRED') {
+          ? (body as ApiErrorBody)
+          : { code: fallback, message: response.statusText || '请求失败', requestId: '' };
+      // A missing device binding is not an expired password login. Sensitive
+      // routes return REAUTH_REQUIRED while low-risk review/query sessions stay valid.
+      if ((response.status === 401 || errorBody.code === 'AUTH_REQUIRED') && errorBody.code !== 'REAUTH_REQUIRED') {
         window.sessionStorage.removeItem('barter-admin-session');
         clearBoundOperatorSession();
         window.dispatchEvent(new Event('barter:auth-expired'));

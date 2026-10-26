@@ -222,7 +222,7 @@ export function createApiClient(options: {
             message: response.statusText || '请求失败',
             requestId: '',
           };
-      if (response.status === 401 || errorBody.code === 'AUTH_REQUIRED') {
+      if ((response.status === 401 || errorBody.code === 'AUTH_REQUIRED') && errorBody.code !== 'REAUTH_REQUIRED') {
         clearSessionAndNotify();
       }
       throw new ApiError(response.status, errorBody);

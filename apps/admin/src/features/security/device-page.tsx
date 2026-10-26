@@ -41,7 +41,12 @@ export function DevicePage({
   };
 
   useEffect(() => {
-    void reload();
+    if (client.getBoundSession()) void reload();
+    else {
+      setDevices([]);
+      setSessions([]);
+      setBusy(false);
+    }
     return client.onIdentityChange?.(() => {
       setDevices(null);
       setSessions(null);
@@ -49,7 +54,6 @@ export function DevicePage({
       setPassword('');
       setError('');
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
   const enroll = async () => {

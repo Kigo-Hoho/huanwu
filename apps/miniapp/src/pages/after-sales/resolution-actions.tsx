@@ -12,7 +12,7 @@ const responsibilityLabels: Record<string, string> = {
 };
 
 export function ResolutionActions({
-  detail, orderVersion, busy, onConsent, onConfirmKeep,
+  detail, busy, onConsent, onConfirmKeep,
 }: {
   detail: CaseDetailView;
   orderVersion: number;

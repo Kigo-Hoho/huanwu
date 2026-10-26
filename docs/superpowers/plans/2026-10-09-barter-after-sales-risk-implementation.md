@@ -343,3 +343,9 @@ Prisma 官方默认文档现已引导新命令体系，本项目仍固定 ORM 7�
 - 六条门槛：本 Task14 会话未在 tip 上声称全绿；不得把未跑通的 e2e 标成通过。`npm run build` 在整理前曾成功（见 `/workspace/task14-build.log`），不替代 verify/e2e。
 - 整分支审查：见 `docs/superpowers/reviews/2026-10-09-phase4-final-review.md`，结论 **Phase 4 不可宣告完成**；售后跨端验收需修复后重跑。
 - 推送/PR/merge：由用户授权后的父代理执行；本执行器不 push。
+
+### 2026-10-26 登录与售后浏览器验收补记
+
+- 运营登录失败不是表单没提交。设备页在只有密码会话时请求设备/会话列表，`REAUTH_REQUIRED` 被管理端当成登录过期并清掉 `barter-admin-session`，Playwright 一直停在「运营审核登录」。修复：未绑定 sid 时不拉列表；`REAUTH_REQUIRED` 不清除低风险密码登录；同一请求里完全相同的设备 cookie 算一份凭证。首次桌面批准仍是一次性 CLI，后续用例用权限 0600 的临时 cookie 文件复用，只写当前 owned 库名。
+- 退回原物用例在两件物品时，确认按钮在退货列表画出来之前被数成 0，第二件义务留在已送达，两笔原款退款因此一直未授权。确认循环改为等「持有」义务行出现后再点下一枚按钮。
+- 本地 PostgreSQL 16.15（CI 为 17）。`npm run e2e -- after-sales-compensation.spec.ts after-sales-returns.spec.ts after-sales-risk.spec.ts` 为 3 passed（约 4.2 分钟），隔离证明通过。全量 `npm run e2e` 为 10 passed / 1 failed：失败在 `listing-review.spec.ts` 客户提交物品，页面告警 `upload is not defined`，发生在运营登录之前，与本次登录修复无关。`npm run verify` 通过；miniapp H5 构建有既有的 vendors.js 体积和 code-splitting 警告。不把全量 e2e 标成通过，也不宣告 Phase 4 完成。

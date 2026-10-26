@@ -235,7 +235,7 @@ export class AfterSalesApi {
         };
         this.attempts.set(slot, attempt);
       }
-      const path = this.pathFor(action, id, parsed);
+      const path = this.pathFor(action, id);
       const current = attempt;
       current.inFlight = this.client.afterSalesRequest(path, 'POST', current.input, current.key).then(raw => {
         const result = this.parseResult(action, raw, id);
@@ -251,7 +251,7 @@ export class AfterSalesApi {
     } catch (cause) { return Promise.reject(cause); }
   }
 
-  private pathFor(action: AfterSalesAction, id: string, parsed: unknown): AfterSalesRequestPath {
+  private pathFor(action: AfterSalesAction, id: string): AfterSalesRequestPath {
     switch (action) {
       case 'open': return `/api/orders/${id}/after-sales`;
       case 'respond': return `/api/after-sales/${id}/response`;
@@ -314,7 +314,7 @@ export class AfterSalesApi {
           expectedOrderVersion: String(meta.expectedOrderVersion),
         },
         header: { Authorization: `Bearer ${token}`, 'Idempotency-Key': current.key },
-      }), current.key).then(raw => {
+      })).then(raw => {
         const result = CaseCommandResultSchema.parse(raw);
         if (result.case.id !== id) throw new Error('命令响应与资源不匹配。');
         if (this.attempts.get(slot) === current) this.attempts.delete(slot);
